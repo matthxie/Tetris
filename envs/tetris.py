@@ -138,8 +138,8 @@ class TetrisEnv(gym.Env):
 		results = self.move_to_placement([x_dest, r_dest])
 		lines_cleared = results[0]
 		result_board = results[1]
-
-		return [result_board, self.stone], lines_cleared, self.gameover, {}
+		
+		return result_board, lines_cleared, self.gameover, {}
 
 	def render(self):
 		pass
@@ -160,7 +160,7 @@ class TetrisEnv(gym.Env):
 		self.blocks_placed = 0
 		self.blocks_placed_limit = 100
 
-		self.next_stones = [rand(len(tetris_shapes))]
+		self.next_stones =[rand(len(tetris_shapes))]
 		self.next_stones.append(rand(len(tetris_shapes)))
 		self.next_stones.append(rand(len(tetris_shapes)))
 

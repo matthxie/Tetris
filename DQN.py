@@ -25,9 +25,7 @@ class DeepQNetwork(nn.Module):
     self.device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
     self.to(self.device)
 
-  def forward(self, state):
-    x = state[0]
-    y = state[1]
+  def forward(self, x):
 
     # x = T.from_numpy(x).float()
     x = T.tensor(x, dtype=T.float32)
@@ -36,6 +34,7 @@ class DeepQNetwork(nn.Module):
 
     x = T.reshape(x, (20,10,1))
     # print(x)
+
 
     x = self.conv1(x)
     #x = self.pool1(x)
