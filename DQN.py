@@ -18,7 +18,7 @@ class DeepQNetwork(nn.Module):
     self.fc1 = nn.Linear(384, 128)
     self.fc2 = nn.Linear(128, 64)
     self.fc3 = nn.Linear(64, 32)
-    self.fc4 = nn.Linear(32, output_dim)
+    self.fc4 = nn.Linear(384, output_dim)
 
     self.optimizer = optim.Adam(self.parameters(), lr=lr)
     self.loss = nn.MSELoss()
@@ -47,9 +47,9 @@ class DeepQNetwork(nn.Module):
 
     # x = T.cat((x, next), dim=1)
 
-    x = self.fc1(x)
-    x = self.fc2(x)
-    x = self.fc3(x)
+    # x = self.fc1(x)
+    # x = self.fc2(x)
+    # x = self.fc3(x)
     x = self.fc4(x)
 
     # print(x)
