@@ -127,7 +127,16 @@ class TetrisEnv(gym.Env):
 	def reset(self):
 		self.init_game()
 
-		return np.array(self.board)[:20, :]
+		board = self.board
+		board[20] = np.zeros(10, dtype=np.float32)
+
+		for i in range(len(self.next_stones)):
+			board[20][i] = self.next_stones[i]
+
+		return board
+
+		# return np.array(self.board)[:20, :]
+		# return np.array(self.board)
 
 	def step(self, action):
 		x_dest = action % 10
@@ -138,6 +147,11 @@ class TetrisEnv(gym.Env):
 		results = self.move_to_placement([x_dest, r_dest])
 		lines_cleared = results[0]
 		result_board = results[1]
+
+		result_board[20] = np.zeros(10, dtype=np.float32)
+
+		for i in range(len(self.next_stones)):
+			result_board[20][i] = self.next_stones[i]
 		
 		return result_board, lines_cleared, self.gameover, {}
 
@@ -208,7 +222,8 @@ class TetrisEnv(gym.Env):
 			self.stone = rotate_clockwise(self.stone)
 		
 		lines_cleared = self.hardDrop()
-		result_board = np.array(self.board)[:20, :]
+		# result_board = np.array(self.board)[:20, :]
+		result_board = np.array(self.board)
 
 		# self.toggle_pause()
 

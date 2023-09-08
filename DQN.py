@@ -10,7 +10,7 @@ class DeepQNetwork(nn.Module):
     self.input_dim = input_dim
     self.n_actions = output_dim
 
-    self.conv1 = nn.Conv2d(in_channels=20, out_channels=64, kernel_size=(3,3), stride=2, padding=1)
+    self.conv1 = nn.Conv2d(in_channels=21, out_channels=64, kernel_size=(3,3), stride=2, padding=1)
     self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
     self.conv2 = nn.Conv2d(in_channels=64, out_channels=32, kernel_size=(2,2), stride=1, padding=1)
     self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
@@ -32,7 +32,7 @@ class DeepQNetwork(nn.Module):
     x = x.unsqueeze(1)
     #print(x)
 
-    x = T.reshape(x, (20,10,1))
+    x = T.reshape(x, (21,10,1))
     # print(x)
 
 
@@ -112,24 +112,10 @@ class DeepQNetwork(nn.Module):
 
       batch = np.random.choice(max_mem, self.batch_size, replace=False)
 
-      # batch_index = np.arange(self.batch_size, dtype=np.int32)
-
-      # state_batch = T.tensor(self.state_memory[batch]).to(self.Q_eval.device)
-      # new_state_batch = T.tensor(self.new_state_memory[batch]).to(self.Q_eval.device)
-      # reward_batch = T.tensor(self.reward_memory[batch]).to(self.Q_eval.device)
-      # terminal_batch = T.tensor(self.terminal_memory[batch]).to(self.Q_eval.device)
-      # action_batch = T.tensor(self.action_memory[batch], dtype=T.int64)
-
       for i in range(len(batch)):
         batch_index = batch[i]
 
-        # print(self.state_memory)
-        # print(self.action_memory)
-
         q_eval = self.Q_eval.forward(self.state_memory[batch_index])
-
-        # print(q_eval)
-
         q_eval = q_eval[self.action_memory[batch_index]]
         q_next = T.max(self.Q_target.forward(self.new_state_memory[batch_index]))
         q_target = self.reward_memory[batch_index] + (1-self.terminal_memory[batch_index]) * self.gamma * q_next
