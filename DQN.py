@@ -48,7 +48,7 @@ class DeepQNetwork(nn.Module):
     input1 = T.flatten(input1)
 
     # print("/nawdfsdfsdfsdfsdlfiuasdfad/n")
-    # print(input1.shape, ", ", input2.shape) 
+    # print(input1.shape, ", ", input2.shape)
 
     input1 = T.cat((input1, input2))
 
@@ -63,7 +63,7 @@ class DeepQNetwork(nn.Module):
 
   class Agent():
     def __init__(self, gamma, epsilon, lr, input_dims, batch_size, n_actions,
-                 max_mem_size=100, eps_end=0.01, eps_dec=5e-4):
+                 max_mem_size=100, eps_end=0.01, eps_dec=5e-6):
       self.gamma = gamma
       self.epsilon = epsilon
       self.eps_min = eps_end

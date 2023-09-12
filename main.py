@@ -25,8 +25,6 @@ for i in range(n_games):
 
     score += reward
 
-    # print(observation)
-
     agent.store_transition(observation, action, reward, observation_, done)
  
     agent.learn()
@@ -36,7 +34,9 @@ for i in range(n_games):
     if n_steps <= 0:
       n_steps = 10
       agent.transfer_weights()
-      
+
+  # print(np.array(env.get_board()))
+
   scores.append(score)
   eps_history.append(agent.epsilon)
 
