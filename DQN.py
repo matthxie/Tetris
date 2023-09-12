@@ -10,7 +10,7 @@ class DeepQNetwork(nn.Module):
     self.input_dim = input_dim
     self.n_actions = output_dim
 
-    self.conv1 = nn.Conv2d(in_channels=21, out_channels=64, kernel_size=(3,3), stride=2, padding=1)
+    self.conv1 = nn.Conv2d(in_channels=20, out_channels=64, kernel_size=(3,3), stride=2, padding=1)
     self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
     self.conv2 = nn.Conv2d(in_channels=64, out_channels=32, kernel_size=(2,2), stride=1, padding=1)
     self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
@@ -18,7 +18,7 @@ class DeepQNetwork(nn.Module):
     self.fc1 = nn.Linear(384, 128)
     self.fc2 = nn.Linear(128, 64)
     self.fc3 = nn.Linear(64, 32)
-    self.fc4 = nn.Linear(384, output_dim)
+    self.fc4 = nn.Linear(384+10, output_dim)
 
     self.optimizer = optim.Adam(self.parameters(), lr=lr)
     self.loss = nn.MSELoss()
@@ -26,35 +26,40 @@ class DeepQNetwork(nn.Module):
     self.to(self.device)
 
   def forward(self, x):
+    board = x[:20]
+    nexts = x[20]
 
     # x = T.from_numpy(x).float()
-    x = T.tensor(x, dtype=T.float32)
-    x = x.unsqueeze(1)
-    #print(x)
+    input1 = T.tensor(board, dtype=T.float32)
+    input1 = input1.unsqueeze(1)
+    input1 = T.reshape(input1, (20, 10, 1))
 
-    x = T.reshape(x, (21,10,1))
-    # print(x)
+    input2 = T.tensor(nexts, dtype=T.float)
+    # input2 = input2.unsqueeze(1)
+    # input2 = T.reshape(nexts, (10,))
 
-
-    x = self.conv1(x)
+    input1 = self.conv1(input1)
     #x = self.pool1(x)
-    x = F.relu(x)
-    x = self.conv2(x)
+    input1 = F.relu(input1)
+    input1 = self.conv2(input1)
     #x = self.pool2(x)
-    x = F.relu(x)
+    input1 = F.relu(input1)
 
-    x = T.flatten(x)
+    input1 = T.flatten(input1)
 
-    # x = T.cat((x, next), dim=1)
+    # print("/nawdfsdfsdfsdfsdlfiuasdfad/n")
+    # print(input1.shape, ", ", input2.shape) 
+
+    input1 = T.cat((input1, input2))
 
     # x = self.fc1(x)
     # x = self.fc2(x)
     # x = self.fc3(x)
-    x = self.fc4(x)
+    input1 = self.fc4(input1)
 
     # print(x)
 
-    return x
+    return input1
 
   class Agent():
     def __init__(self, gamma, epsilon, lr, input_dims, batch_size, n_actions,
@@ -91,7 +96,7 @@ class DeepQNetwork(nn.Module):
 
     def choose_action(self, observation):
       if np.random.random() > self.epsilon:
-        state = T.tensor([observation]).to(self.Q_eval.device)
+        state = observation
         actions = self.Q_eval.forward(state)
         action = T.argmax(actions).item()
       else:
@@ -117,6 +122,7 @@ class DeepQNetwork(nn.Module):
 
         q_eval = self.Q_eval.forward(self.state_memory[batch_index])
         q_eval = q_eval[self.action_memory[batch_index]]
+
         q_next = T.max(self.Q_target.forward(self.new_state_memory[batch_index]))
         q_target = self.reward_memory[batch_index] + (1-self.terminal_memory[batch_index]) * self.gamma * q_next
 

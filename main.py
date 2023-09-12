@@ -36,7 +36,7 @@ for i in range(n_games):
     if n_steps <= 0:
       n_steps = 10
       agent.transfer_weights()
-
+      
   scores.append(score)
   eps_history.append(agent.epsilon)
 

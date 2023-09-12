@@ -133,7 +133,7 @@ class TetrisEnv(gym.Env):
 		for i in range(len(self.next_stones)):
 			board[20][i] = self.next_stones[i]
 
-		return board
+		return np.array(board)
 
 		# return np.array(self.board)[:20, :]
 		# return np.array(self.board)
@@ -153,7 +153,7 @@ class TetrisEnv(gym.Env):
 		for i in range(len(self.next_stones)):
 			result_board[20][i] = self.next_stones[i]
 		
-		return result_board, lines_cleared, self.gameover, {}
+		return np.array(result_board), lines_cleared, self.gameover, {}
 
 	def render(self):
 		pass
@@ -227,7 +227,7 @@ class TetrisEnv(gym.Env):
 
 		# self.toggle_pause()
 
-		return [lines_cleared, result_board]
+		return np.array([lines_cleared, result_board])
 	
 	def move(self, delta_x):
 		new_x = self.stone_x + delta_x
