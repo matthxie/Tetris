@@ -10,15 +10,19 @@ class DeepQNetwork(nn.Module):
     self.input_dim = input_dim
     self.n_actions = output_dim
 
+    # self.conv3_1 = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(3,3), stride=2, padding=1)
+    # self.conv3_2 = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=(3,3), stride=2, padding=1)
+    # self.conv3_3 = nn.Conv3d(in_channels=32, out_channels=64, kernel_size=(3,3), stride=2, padding=1)
+
     self.conv1 = nn.Conv2d(in_channels=20, out_channels=64, kernel_size=(3,3), stride=2, padding=1)
     self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
     self.conv2 = nn.Conv2d(in_channels=64, out_channels=32, kernel_size=(2,2), stride=1, padding=1)
     self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
 
-    self.fc1 = nn.Linear(384, 128)
+    self.fc1 = nn.Linear(384+10, 512)
     self.fc2 = nn.Linear(128, 64)
     self.fc3 = nn.Linear(64, 32)
-    self.fc4 = nn.Linear(384+10, output_dim)
+    self.fc4 = nn.Linear(512, output_dim)
 
     self.optimizer = optim.Adam(self.parameters(), lr=lr)
     self.loss = nn.MSELoss()
@@ -52,7 +56,7 @@ class DeepQNetwork(nn.Module):
 
     input1 = T.cat((input1, input2))
 
-    # x = self.fc1(x)
+    input1 = self.fc1(input1)
     # x = self.fc2(x)
     # x = self.fc3(x)
     input1 = self.fc4(input1)
@@ -132,3 +136,6 @@ class DeepQNetwork(nn.Module):
 
         self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min \
                       else self.eps_min
+
+    def set_eps(self, eps):
+      self.epsilon = eps

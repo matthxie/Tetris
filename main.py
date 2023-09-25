@@ -42,6 +42,8 @@ for i in range(n_games):
 
   avg_score = np.mean(scores[-100:])
 
+  agent.set_eps(1 - 0.5 * avg_score)
+
   print('episode ', i, 'score %.2f ' % score,
         'average score %.2f ' % avg_score,
         'epsilon %.2f ' % agent.epsilon)
