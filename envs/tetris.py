@@ -69,8 +69,11 @@ def check_collision(board, shape, offset):
 	return False
 
 def remove_row(board, row):
-	del board[row]
-	return [[0 for i in range(config['cols'])]] + board
+	# del board[row]
+	board = np.delete(board, row, axis=0)
+	board = np.vstack((np.zeros((1, 10), dtype=np.float32), board))
+
+	return board
 	
 def join_matrixes(mat1, mat2, mat2_off):
 	off_x, off_y = mat2_off
@@ -90,13 +93,28 @@ def get_board_heights(board):
 	boardHeights = []
 
 	for i in range(10):
-		colHeight = 0
 		for j in range(20):
 			if board[j][i] != 0:
-				colHeight += 1
-		boardHeights.append(colHeight)
+				boardHeights.append(20-j)
+				break
+			if j == 19 and board[j][i] == 0:
+				boardHeights.append(0)
 
 	return boardHeights
+
+def get_num_holes(board):
+	holes = 0
+
+	for i in range(10):
+		new_col = True
+		for j in range(20):
+			if new_col and board[j][i] != 0:
+				new_col = False
+				continue
+			if board[j][i] == 0 and not new_col:
+				holes += 1
+
+	return holes
 
 class TetrisEnv(gym.Env):
 	def __init__(self, state_dim=40, action_dim=(10,20)):
@@ -106,23 +124,37 @@ class TetrisEnv(gym.Env):
 		self.gameover = False
 		self.paused = False
 		self.blocks_placed = 0
-		self.blocks_placed_limit = 100
+		self.lines_cleared = 0
 		
 		self.width = config['cell_size']*config['cols']
 		self.height = config['cell_size']*config['rows']
 		self.next_stones = []
 
+		for _ in range(4):
+			self.next_stones.append(rand(1, len(tetris_shapes)+1))
+
 		self.board = new_board()
-		self.new_stone()
 		
 		# self.screen = pygame.display.set_mode((self.width, self.height))
 		
 		self.action_space = spaces.Discrete(state_dim)
-		self.observation_space = spaces.Box(low=0, high=7, shape=(10,20), dtype=np.int32)
+		self.observation_space = spaces.Box(low=0, high=7, shape=(10,21), dtype=np.int32)
 		
 		pygame.event.set_blocked(pygame.MOUSEMOTION)
 
 		# self.init_game()
+
+	def calc_reward(self, board):
+		reward = 0.0
+		
+		heights = get_board_heights(board)
+		holes = get_num_holes(board)
+
+		reward += sum(heights) * -0.51
+		reward += np.var(heights) * -0.18
+		reward += holes * -0.36
+
+		return reward
 
 	def reset(self):
 		self.init_game()
@@ -135,33 +167,37 @@ class TetrisEnv(gym.Env):
 
 		return np.array(board)
 
-		# return np.array(self.board)[:20, :]
-		# return np.array(self.board)
-
 	def step(self, action):
 		x_dest = action % 10
 		r_dest = int(action / 10)
 
 		self.blocks_placed += 1
+		old_reward = self.calc_reward(self.board)
 
 		results = self.move_to_placement([x_dest, r_dest])
 		lines_cleared = results[0]
 		result_board = results[1]
+		self.lines_cleared += lines_cleared
 
 		result_board[20] = np.zeros(10, dtype=np.float32)
 
 		for i in range(len(self.next_stones)):
 			result_board[20][i] = self.next_stones[i]
-		
-		return np.array(result_board), lines_cleared, self.gameover, {}
+
+		self.board = result_board
+		reward = self.calc_reward(result_board) - old_reward + lines_cleared**2
+
+		return np.array(result_board), reward, self.gameover, {}
 
 	def render(self):
 		pass
 
 	def new_stone(self):
-		self.next_stones.append(rand(len(tetris_shapes)))
+		self.next_stones.append(rand(1, len(tetris_shapes)+1))
 
-		self.stone = tetris_shapes[self.next_stones.pop(0)]
+		self.stone = tetris_shapes[self.next_stones[1]-1]
+		self.next_stones.pop(0)
+		
 		self.stone_x = int(config['cols'] / 2 - len(self.stone[0])/2)
 		self.stone_y = 0
 		
@@ -172,15 +208,15 @@ class TetrisEnv(gym.Env):
 		self.gameover = False
 		self.paused = False
 		self.blocks_placed = 0
-		self.blocks_placed_limit = 100
+		self.lines_cleared = 0
 
-		self.next_stones =[rand(len(tetris_shapes))]
-		self.next_stones.append(rand(len(tetris_shapes)))
-		self.next_stones.append(rand(len(tetris_shapes)))
+		self.next_stones =[rand(1, len(tetris_shapes)+1)]
+		self.next_stones.append(rand(1, len(tetris_shapes)+1))
+		self.next_stones.append(rand(1, len(tetris_shapes)+1))
 
 		self.board = new_board()
 		self.new_stone()
-	
+
 	def center_msg(self, msg):
 		for i, line in enumerate(msg.splitlines()):
 			msg_image =  pygame.font.Font(
@@ -223,7 +259,7 @@ class TetrisEnv(gym.Env):
 		
 		lines_cleared = self.hardDrop()
 		# result_board = np.array(self.board)[:20, :]
-		result_board = np.array(self.board)
+		result_board = np.array(self.board, dtype=np.float32)
 
 		# self.toggle_pause()
 

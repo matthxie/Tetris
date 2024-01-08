@@ -1,3 +1,8 @@
+import torch
+import torch.nn as nn
+from collections import deque
+import itertools
+import random
 import gym
 from DQN import DeepQNetwork
 import numpy as np
@@ -6,44 +11,124 @@ from envs import tetris
 
 # tetris.register()
 
-env = gym.make("Tetris-v0")
-agent = DeepQNetwork.Agent(gamma=0.99, epsilon=1.0, lr=0.003, input_dims=(21,10),
-                           batch_size=64, n_actions=40, eps_end=0.01)
-scores, eps_history = [], []
+GAMMA = 0.99
+BATCH_SIZE = 64
+REPLAY_SIZE = 50_000
+MIN_REPLAY_SIZE = 1000
+EPSILON_START = 1.0
+EPSILON_END = 0.02
+EPSILON_DECAY = 10_000
+LEARNING_RATE = 5e-4
+TARGET_UPDATE_FREQ = 1000
+
 n_games = 500
 n_steps = 10
 
-for i in range(n_games):
-  score = 0
-  done = False
-  observation = env.reset()
+env = gym.make("Tetris-v0")
 
-  while not done:
-    action = agent.choose_action(observation)
+replay_memory = deque(maxlen=REPLAY_SIZE)
+reward_memory = deque([0,0], maxlen=100)
+episode_reward = 0.0
 
-    observation_, reward, done, info = env.step(action)
+policy_net = DeepQNetwork(lr=0.003, input_dim=(21, 10), output_dim=40)
+target_net = DeepQNetwork(lr=0.003, input_dim=(21, 10), output_dim=40)
 
-    score += reward
+target_net.load_state_dict(policy_net.state_dict())
 
-    agent.store_transition(observation, action, reward, observation_, done)
- 
-    agent.learn()
-    observation = observation_
-    n_steps -= 1
+optimizer = torch.optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
 
-    if n_steps <= 0:
-      n_steps = 10
-      agent.transfer_weights()
+obs = env.reset()
 
-  # print(np.array(env.get_board()))
+def feed_batch(batch, net):
+  output = []
 
-  scores.append(score)
-  eps_history.append(agent.epsilon)
+  for i in range(BATCH_SIZE):
+    output.append(net(batch[i]))
 
-  avg_score = np.mean(scores[-100:])
+  return torch.stack(output, dim=0)
 
-  agent.set_eps(1 - 0.5 * avg_score)
+# init replay memory
+for _ in range(MIN_REPLAY_SIZE):
+  action = env.action_space.sample()
 
-  print('episode ', i, 'score %.2f ' % score,
-        'average score %.2f ' % avg_score,
-        'epsilon %.2f ' % agent.epsilon)
+  new_obs, reward, done, info = env.step(action)
+  transition = (obs, action, reward, done, new_obs)
+  replay_memory.append(transition)
+  reward_memory.append(transition[2])
+
+  obs = new_obs
+
+  if done:
+    obs = env.reset()
+
+# training loop
+for step in itertools.count():
+  epsilon = np.interp(step, [0, EPSILON_DECAY], [EPSILON_START, EPSILON_END])
+
+  rand_sample = random.random()
+
+  if rand_sample <= epsilon:
+    action = env.action_space.sample()
+  else:
+    action = policy_net.act(obs)
+
+  # print("------------------------------------------------")
+
+  new_obs, reward, done, info = env.step(action)
+  transition = (obs, action, reward, done, new_obs)
+  replay_memory.append(transition)
+
+  # print()
+  # print(obs)
+  # print(action)
+  # print("================================")
+  # print(new_obs)
+  # print()
+
+  # print("------------------------------------------------")
+
+  obs = new_obs
+
+  episode_reward += reward
+  
+  if done:
+    obs = env.reset()
+
+    reward_memory.append(episode_reward)
+    episode_reward = 0.0
+
+  # start gradient step
+  transitions = random.sample(replay_memory, BATCH_SIZE)
+
+  obses = torch.as_tensor(np.asarray([t[0] for t in transitions]), dtype=torch.float32)
+  actions = torch.as_tensor(np.asarray([t[1] for t in transitions]), dtype=torch.int64).unsqueeze(-1)
+  rewards = torch.as_tensor(np.asarray([t[2] for t in transitions]), dtype=torch.float32).unsqueeze(-1)
+  dones = torch.as_tensor(np.asarray([t[3] for t in transitions]), dtype=torch.float32).unsqueeze(-1)
+  new_obses = torch.as_tensor(np.asarray([t[4] for t in transitions]), dtype=torch.float32)
+
+  target_q_values = feed_batch(new_obses, target_net)
+  max_target_q_values = target_q_values.max(dim=1, keepdim=True)[0]
+
+  targets = rewards + GAMMA * (1 - dones) * max_target_q_values
+
+  # compute loss
+  q_values = feed_batch(obses, policy_net)
+  action_q_values = torch.gather(input=q_values, dim=1, index=actions)
+
+  loss = nn.functional.smooth_l1_loss(action_q_values, targets)
+
+  # gradient descent
+  optimizer.zero_grad()
+  loss.backward()
+  optimizer.step()
+
+  # update taret network
+  if step % TARGET_UPDATE_FREQ == 0:
+    target_net.load_state_dict(policy_net.state_dict())
+
+  # logging
+  if step % 1000 == 0:
+    print()
+    print("Step: ", step)
+    print("Average reward: ", np.mean(reward_memory))
+    print("Epsilon: ", epsilon)
