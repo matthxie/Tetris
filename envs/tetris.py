@@ -155,6 +155,32 @@ class TetrisEnv(gym.Env):
 		reward += holes * -0.36
 
 		return reward
+	
+	def check_invalid_move(self, x_dest, r_dest):
+		stone = self.next_stones[0]
+		# rot = self.stone.copy()
+
+		# for _ in range(r_dest):
+		# 	rot = rotate_clockwise(rot)
+
+		if stone == 7:
+			if x_dest == 9:
+				# print(self.stone, ", ", rot, ", ", stone, ", ", x_dest, ", ", r_dest)
+				return True
+		elif stone == 6:
+			if (r_dest == 0 or r_dest == 2) and x_dest > 6:
+				# print(self.stone, ", ", rot, ", ", stone, ", ", x_dest, ", ", r_dest)
+				return True
+		else:
+			if x_dest == 9:
+				# print(self.stone, ", ", rot, ", ", stone, ", ", x_dest, ", ", r_dest)
+				return True
+			elif x_dest == 8 and r_dest != 1 and r_dest != 3:
+				# print(self.stone, ", ", rot, ", ", stone, ", ", x_dest, ", ", r_dest)
+				return True
+			
+		return False
+
 
 	def reset(self):
 		self.init_game()
@@ -170,6 +196,9 @@ class TetrisEnv(gym.Env):
 	def step(self, action):
 		x_dest = action % 10
 		r_dest = int(action / 10)
+
+		if self.check_invalid_move(x_dest, r_dest):
+			return np.array(self.board), -10, self.gameover, {}
 
 		self.blocks_placed += 1
 		old_reward = self.calc_reward(self.board)

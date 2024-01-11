@@ -20,9 +20,7 @@ EPSILON_END = 0.02
 EPSILON_DECAY = 10_000
 LEARNING_RATE = 5e-4
 TARGET_UPDATE_FREQ = 1000
-
-n_games = 500
-n_steps = 10
+NUM_ACTIONS = 40
 
 env = gym.make("Tetris-v0")
 
@@ -30,8 +28,8 @@ replay_memory = deque(maxlen=REPLAY_SIZE)
 reward_memory = deque([0,0], maxlen=100)
 episode_reward = 0.0
 
-policy_net = DeepQNetwork(lr=0.003, input_dim=(21, 10), output_dim=40)
-target_net = DeepQNetwork(lr=0.003, input_dim=(21, 10), output_dim=40)
+policy_net = DeepQNetwork(lr=LEARNING_RATE, input_dim=(21, 10), output_dim=NUM_ACTIONS)
+target_net = DeepQNetwork(lr=LEARNING_RATE, input_dim=(21, 10), output_dim=NUM_ACTIONS)
 
 target_net.load_state_dict(policy_net.state_dict())
 
@@ -106,13 +104,15 @@ for step in itertools.count():
   dones = torch.as_tensor(np.asarray([t[3] for t in transitions]), dtype=torch.float32).unsqueeze(-1)
   new_obses = torch.as_tensor(np.asarray([t[4] for t in transitions]), dtype=torch.float32)
 
-  target_q_values = feed_batch(new_obses, target_net)
+  # target_q_values = feed_batch(new_obses, target_net)
+  target_q_values = target_net(new_obses)
   max_target_q_values = target_q_values.max(dim=1, keepdim=True)[0]
 
   targets = rewards + GAMMA * (1 - dones) * max_target_q_values
 
   # compute loss
-  q_values = feed_batch(obses, policy_net)
+  # q_values = feed_batch(obses, policy_net)
+  q_values = policy_net(new_obses)
   action_q_values = torch.gather(input=q_values, dim=1, index=actions)
 
   loss = nn.functional.smooth_l1_loss(action_q_values, targets)
@@ -132,3 +132,7 @@ for step in itertools.count():
     print("Step: ", step)
     print("Average reward: ", np.mean(reward_memory))
     print("Epsilon: ", epsilon)
+
+  if step == 20_000:
+    torch.save(policy_net.state_dict(), "policy_weights.pth")
+    torch.save(target_net.state_dict(), "target_weights.pth")
