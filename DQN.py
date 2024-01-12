@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import numpy as np
 
 class DeepQNetwork(nn.Module):
   def __init__(self, lr, input_dim, output_dim):
@@ -18,7 +19,7 @@ class DeepQNetwork(nn.Module):
     self.pool1 = nn.MaxPool2d(kernel_size=2, stride=1)
     self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
 
-    self.fc1 = nn.Linear(6165, 128)
+    self.fc1 = nn.Linear(36, 128)
     self.fc2 = nn.Linear(128, 512)
     self.fc3 = nn.Linear(64, 32)
     self.fc4 = nn.Linear(512, output_dim)
@@ -29,53 +30,38 @@ class DeepQNetwork(nn.Module):
     self.to(self.device)
 
   def forward(self, x):
-    board = x[:, :20, :]
-    temp_nexts = x[:, 20, :]
-    
+    temp_nexts = x[:, 12:]
+    keep = x[:, :11]
     nexts = []
-    temp = [0,0,0,0,0,0,0]
 
-    for j in range(len(temp_nexts)):
+    for j in range(len(x)):
       arr = []
+
+      indicator_ = [0,0,0,0]
+      indicator_[int(x[j][11].item())] = 1
+      arr.extend(indicator_)
+
       for i in range(3):
-        indicator = temp.copy()
+        indicator = [0,0,0,0,0,0,0]
 
         if temp_nexts[j][i] != 0:
           indicator[int(temp_nexts[j][i].item())-1] = 1
-
-        arr.extend(indicator)
+          arr.extend(indicator)
+        else:
+          print(x[j])
       nexts.append(arr)
 
-    # x = torch.from_numpy(x).float()
-    input1 = board.clone().detach().unsqueeze(1)
-    input2 = torch.tensor(nexts).clone().detach()
-    # input2 = input2.unsqueeze(1)
-    # input2 = torch.reshape(nexts, (10,))
+    nexts = torch.tensor(np.array(nexts, dtype=np.float32))
 
-    input1 = self.conv1(input1)
-    input1 = F.relu(input1)
-    input1 = self.conv2(input1)
-    input1 = F.relu(input1)
+    input = torch.cat((keep, nexts), dim=1)
 
-    input1 = self.pool1(input1)
+    output = self.fc1(input)
+    output = F.relu(output)
+    output = self.fc2(output)
+    output = F.relu(output)
+    output = self.fc4(output)
 
-    input1 = self.conv3(input1)
-    input1 = F.relu(input1)
-
-    input1 = self.pool1(input1)
-
-    # input1 = self.conv5(input1)
-    # input1 = F.relu(input1)
-
-    input1 = input1.view(input1.size(0), input1.size(1) * input1.size(2) * input1.size(3))
-
-    input1 = torch.cat([input1, input2], dim=1)
-
-    input1 = self.fc1(input1)
-    input1 = self.fc2(input1)
-    input1 = self.fc4(input1)
-
-    return input1
+    return output
   
   def act(self, obs):
     obs = torch.as_tensor(obs, dtype=torch.float32)

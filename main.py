@@ -20,7 +20,7 @@ EPSILON_END = 0.02
 EPSILON_DECAY = 10_000
 LEARNING_RATE = 5e-4
 TARGET_UPDATE_FREQ = 1000
-NUM_ACTIONS = 40
+NUM_ACTIONS = 11
 
 env = gym.make("Tetris-v0")
 
@@ -98,11 +98,15 @@ for step in itertools.count():
   # start gradient step
   transitions = random.sample(replay_memory, BATCH_SIZE)
 
-  obses = torch.as_tensor(np.asarray([t[0] for t in transitions]), dtype=torch.float32)
+  for t in transitions:
+    if len(t[0]) != 15:
+      print(t[0])
+
+  obses = torch.as_tensor(np.array([t[0] for t in transitions]), dtype=torch.int64)
   actions = torch.as_tensor(np.asarray([t[1] for t in transitions]), dtype=torch.int64).unsqueeze(-1)
   rewards = torch.as_tensor(np.asarray([t[2] for t in transitions]), dtype=torch.float32).unsqueeze(-1)
   dones = torch.as_tensor(np.asarray([t[3] for t in transitions]), dtype=torch.float32).unsqueeze(-1)
-  new_obses = torch.as_tensor(np.asarray([t[4] for t in transitions]), dtype=torch.float32)
+  new_obses = torch.as_tensor(np.array([t[4] for t in transitions]), dtype=torch.int64)
 
   # target_q_values = feed_batch(new_obses, target_net)
   target_q_values = target_net(new_obses)

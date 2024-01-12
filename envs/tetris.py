@@ -28,22 +28,22 @@ tetris_shapes = [
 	[[1, 1, 1],
 	 [0, 1, 0]],
 	
-	[[0, 2, 2],
-	 [2, 2, 0]],
+	[[0, 1, 1],
+	 [1, 1, 0]],
 	
-	[[3, 3, 0],
-	 [0, 3, 3]],
+	[[1, 1, 0],
+	 [0, 1, 1]],
 	
-	[[4, 0, 0],
-	 [4, 4, 4]],
+	[[1, 0, 0],
+	 [1, 1, 1]],
 	
-	[[0, 0, 5],
-	 [5, 5, 5]],
+	[[0, 0, 1],
+	 [1, 1, 1]],
 	
-	[[6, 6, 6, 6]],
+	[[1, 1, 1, 1]],
 	
-	[[7, 7],
-	 [7, 7]]
+	[[1, 1],
+	 [1, 1]]
 ]
 
 # def register():
@@ -87,7 +87,7 @@ def new_board():
 			for y in range(config['rows']) ]
 	board += [[ 1 for x in range(config['cols'])]]
 	
-	return board
+	return np.array(board)
 
 def get_board_heights(board):
 	boardHeights = []
@@ -117,7 +117,7 @@ def get_num_holes(board):
 	return holes
 
 class TetrisEnv(gym.Env):
-	def __init__(self, state_dim=40, action_dim=(10,20)):
+	def __init__(self, state_dim=11, action_dim=(10,20)):
 		pygame.init()
 		# pygame.key.set_repeat(250,25)
 
@@ -129,8 +129,9 @@ class TetrisEnv(gym.Env):
 		self.width = config['cell_size']*config['cols']
 		self.height = config['cell_size']*config['rows']
 		self.next_stones = []
+		self.stone_orientation = 0
 
-		for _ in range(4):
+		for _ in range(3):
 			self.next_stones.append(rand(1, len(tetris_shapes)+1))
 
 		self.board = new_board()
@@ -138,7 +139,7 @@ class TetrisEnv(gym.Env):
 		# self.screen = pygame.display.set_mode((self.width, self.height))
 		
 		self.action_space = spaces.Discrete(state_dim)
-		self.observation_space = spaces.Box(low=0, high=7, shape=(10,21), dtype=np.int32)
+		self.observation_space = spaces.Box(low=0, high=210, shape=(15,), dtype=np.int32)
 		
 		pygame.event.set_blocked(pygame.MOUSEMOTION)
 
@@ -151,31 +152,27 @@ class TetrisEnv(gym.Env):
 		holes = get_num_holes(board)
 
 		reward += sum(heights) * -0.51
-		reward += np.var(heights) * -0.18
+		reward += np.sum(np.abs(np.diff(heights))) * -0.18
 		reward += holes * -0.36
 
 		return reward
 	
-	def check_invalid_move(self, x_dest, r_dest):
+	def check_invalid_move(self, x_dest):
 		stone = self.next_stones[0]
-		# rot = self.stone.copy()
-
-		# for _ in range(r_dest):
-		# 	rot = rotate_clockwise(rot)
 
 		if stone == 7:
 			if x_dest == 9:
 				# print(self.stone, ", ", rot, ", ", stone, ", ", x_dest, ", ", r_dest)
 				return True
 		elif stone == 6:
-			if (r_dest == 0 or r_dest == 2) and x_dest > 6:
+			if (self.stone_orientation == 0 or self.stone_orientation == 2) and x_dest > 6:
 				# print(self.stone, ", ", rot, ", ", stone, ", ", x_dest, ", ", r_dest)
 				return True
 		else:
 			if x_dest == 9:
 				# print(self.stone, ", ", rot, ", ", stone, ", ", x_dest, ", ", r_dest)
 				return True
-			elif x_dest == 8 and r_dest != 1 and r_dest != 3:
+			elif x_dest == 8 and self.stone_orientation != 1 and self.stone_orientation != 3:
 				# print(self.stone, ", ", rot, ", ", stone, ", ", x_dest, ", ", r_dest)
 				return True
 			
@@ -185,38 +182,57 @@ class TetrisEnv(gym.Env):
 	def reset(self):
 		self.init_game()
 
-		board = self.board
-		board[20] = np.zeros(10, dtype=np.float32)
+		heights = get_board_heights(self.board)
+		holes = get_num_holes(self.board)
 
-		for i in range(len(self.next_stones)):
-			board[20][i] = self.next_stones[i]
+		result_info = heights
+		result_info.append(holes)
+		result_info.append(self.stone_orientation)
+		result_info.extend(self.next_stones)
 
-		return np.array(board)
+		return np.array(result_info, dtype=np.int32)
 
 	def step(self, action):
-		x_dest = action % 10
-		r_dest = int(action / 10)
+		heights = get_board_heights(self.board)
+		holes = get_num_holes(self.board)
 
-		if self.check_invalid_move(x_dest, r_dest):
-			return np.array(self.board), -10, self.gameover, {}
+		result_info = heights
+		result_info.append(holes)
+		result_info.append(self.stone_orientation)
+		result_info.extend(self.next_stones)
+		
+		if action == 10:
+			self.stone = rotate_clockwise(self.stone)
+			self.stone_orientation = (self.stone_orientation+1) % 4
+
+			if self.stone_orientation == 0:
+				return np.array(result_info), -5, self.gameover, {}
+			return np.array(result_info, dtype=np.int32), 0, self.gameover, {}
+
+		x_dest = action
+
+		if self.check_invalid_move(x_dest):
+			return np.array(result_info, dtype=np.int32), -10, self.gameover, {}
 
 		self.blocks_placed += 1
 		old_reward = self.calc_reward(self.board)
 
-		results = self.move_to_placement([x_dest, r_dest])
+		results = self.move_to_placement(x_dest)
 		lines_cleared = results[0]
-		result_board = results[1]
+		self.board = results[1]
+		result_board = self.board.copy()
 		self.lines_cleared += lines_cleared
 
-		result_board[20] = np.zeros(10, dtype=np.float32)
+		heights = get_board_heights(self.board)
+		holes = get_num_holes(self.board)
+		reward = self.calc_reward(result_board) - old_reward + lines_cleared*0.76
 
-		for i in range(len(self.next_stones)):
-			result_board[20][i] = self.next_stones[i]
+		result_info = heights
+		result_info.append(holes)
+		result_info.append(self.stone_orientation)
+		result_info.extend(self.next_stones)
 
-		self.board = result_board
-		reward = self.calc_reward(result_board) - old_reward + lines_cleared**2
-
-		return np.array(result_board), reward, self.gameover, {}
+		return np.array(result_info, dtype=np.int32), reward, self.gameover, {}
 
 	def render(self):
 		pass
@@ -245,6 +261,7 @@ class TetrisEnv(gym.Env):
 
 		self.board = new_board()
 		self.new_stone()
+		self.stone_orientation = 0
 
 	def center_msg(self, msg):
 		for i, line in enumerate(msg.splitlines()):
@@ -275,16 +292,11 @@ class TetrisEnv(gym.Env):
 	# 						config['cell_size'],
 	# 						config['cell_size']),0)
 	
-	def move_to_placement(self, movement):
-		x_dest = movement[0]
-		r_dest = movement[1]
+	def move_to_placement(self, x_dest):
 		delta_x = x_dest - self.stone_x
 		# self.toggle_pause()
 
 		self.move(delta_x)
-		
-		for _ in range(r_dest):
-			self.stone = rotate_clockwise(self.stone)
 		
 		lines_cleared = self.hardDrop()
 		# result_board = np.array(self.board)[:20, :]
