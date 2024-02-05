@@ -8,16 +8,17 @@ from alt_dqn import AltDeepQNetwork
 import numpy as np
 from envs import alt_tetris
 
-GAMMA = 0.90
-BATCH_SIZE = 64
+GAMMA = 0.98
+BATCH_SIZE = 512
 REPLAY_SIZE = 50_000
 MIN_REPLAY_SIZE = 1000
-EPSILON_START = 0.02
+EPSILON_START = 1.00
 EPSILON_END = 0.02
 EPSILON_DECAY = 10_000
 LEARNING_RATE = 5e-4
-TARGET_UPDATE_FREQ = 400
+TARGET_UPDATE_FREQ = 1000
 NUM_ACTIONS = 1
+NUM_EPOCHS = 20_000
 
 env = alt_tetris.TetrisEnv()
 
@@ -66,7 +67,7 @@ for _ in range(MIN_REPLAY_SIZE):
 
 # training loop
 for step in itertools.count():
-  if step == 20:
+  if step == NUM_EPOCHS:
     break
 
   epsilon = np.interp(step, [0, EPSILON_DECAY], [EPSILON_START, EPSILON_END])
@@ -100,33 +101,33 @@ for step in itertools.count():
   # start gradient step
   transitions = random.sample(replay_memory, BATCH_SIZE)
 
-  obses = torch.as_tensor(np.array([t[0] for t in transitions]), dtype=torch.int64)
+  obses = torch.as_tensor(np.array([t[0] for t in transitions]), dtype=torch.float32)
   actions = torch.as_tensor(np.asarray([t[1] for t in transitions]), dtype=torch.int64).unsqueeze(-1)
   rewards = torch.as_tensor(np.asarray([t[2] for t in transitions]), dtype=torch.float32).unsqueeze(-1)
   dones = torch.as_tensor(np.asarray([t[3] for t in transitions]), dtype=torch.float32).unsqueeze(-1)
-  new_obses = torch.as_tensor(np.array([t[4] for t in transitions]), dtype=torch.int64)
+  new_obses = torch.as_tensor(np.array([t[4] for t in transitions]), dtype=torch.float32)
 
   # target_q_values = feed_batch(new_obses, target_net)
   target_q_values = target_net(new_obses)
   # max_target_q_values = target_q_values.max(dim=1, keepdim=True)[0]
 
-  targets = rewards + GAMMA * (1 - dones) * target_q_values
+  targets = GAMMA * (1 - dones) * (rewards + target_q_values)
 
   # compute loss
   # q_values = feed_batch(obses, policy_net)
-  q_values = policy_net(new_obses)
+  q_values = policy_net(obses)
 
   # action_q_values = torch.gather(input=q_values, dim=1, index=actions)
 
   loss = nn.functional.smooth_l1_loss(q_values, targets)
   # loss = nn.MSELoss(q_values, targets)
 
-  q_value_history.append(policy_net(example_obs).item())
+  # q_value_history.append(policy_net(example_obs).item())
 
   # gradient descent
   optimizer.zero_grad()
   loss.backward()
-  torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=1.0)
+  torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=5.0)
   optimizer.step()
 
   loss_history.append(loss.item())
@@ -142,12 +143,12 @@ for step in itertools.count():
     print("Average reward: ", np.mean(reward_memory))
     print("Epsilon: ", epsilon)
 
-  if step == 20_000:
+  if step == NUM_EPOCHS-1:
     torch.save(policy_net.state_dict(), "policy_weights.pth")
     torch.save(target_net.state_dict(), "target_weights.pth")
 
-plt.plot(q_value_history)
-plt.savefig('q_value_history.png')
+# plt.plot(q_value_history)
+# plt.savefig('q_value_history.png')
 plt.plot(loss_history)
 plt.savefig('loss_history.png')
 plt.plot(reward_history)
