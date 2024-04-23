@@ -1,6 +1,4 @@
-from gym import spaces
 import numpy as np
-import torch
 from random import randrange as rand
 import pygame, sys
 
@@ -45,12 +43,6 @@ tetris_shapes = [
 	[[1, 1],
 	 [1, 1]]
 ]
-
-# def register():
-# 	gym.envs.register(
-# 		id='Tetris-v0',
-# 		entry_point='Tetris.envs:tetris:TetrisEnv'
-# 	)
 
 def rotate_clockwise(shape):
 	return [ [ shape[y][x]
@@ -103,10 +95,11 @@ def get_board_heights(board):
 	return boardHeights
 
 def get_bumpiness(heights):
-	bumpiness = 0
-	for i in range(len(heights)-1):
-		bumpiness += np.abs(heights[i+1] - heights[i])
-	return bumpiness
+	currs = np.array(heights[:-1])
+	nexts = np.array(heights[1:])
+	diffs = np.abs(currs - nexts)
+	total_bumpiness = np.sum(diffs)
+	return total_bumpiness
 
 def get_num_holes(board):
 	holes = 0
@@ -127,7 +120,7 @@ class TetrisEnv():
 		pygame.init()
 		# pygame.key.set_repeat(250,25)
 
-		self.gameover = False
+		self.gameover = 0
 		self.paused = False
 		self.blocks_placed = 0
 		self.lines_cleared = 0
@@ -141,11 +134,6 @@ class TetrisEnv():
 			self.next_stones.append(rand(1, len(tetris_shapes)+1))
 
 		self.board = new_board()
-		
-		# self.screen = pygame.display.set_mode((self.width, self.height))
-		
-		self.action_space = spaces.Discrete(state_dim)
-		self.observation_space = spaces.Box(low=0, high=210, shape=(15,), dtype=np.int64)
 		
 		pygame.event.set_blocked(pygame.MOUSEMOTION)
 
@@ -220,7 +208,7 @@ class TetrisEnv():
 		self.blocks_placed += 1
 		old_reward = self.calc_reward(self.board)
 
-		results = self.move_to_placement(x_dest)
+		results = self.move_to_placement(x_dest, probe)
 		lines_cleared = results[0]
 		result_board = results[1]
 		self.lines_cleared += lines_cleared
@@ -231,7 +219,8 @@ class TetrisEnv():
 		heights = get_board_heights(result_board)
 		bumpiness = get_bumpiness(heights)
 		holes = get_num_holes(result_board)
-		reward = 1 + (self.calc_reward(result_board) - old_reward) + lines_cleared*10
+		reward = 1 + 10*lines_cleared**2
+		# reward = self.calc_reward(result_board) - old_reward + 10*lines_cleared
 
 		next_state = self.board[:-1]
 		result_info = np.array(self.next_stones, dtype=np.int64)
@@ -240,7 +229,8 @@ class TetrisEnv():
 		result_info = np.append(result_info, holes)
 
 		if display:
-			print(self.board)
+			# print(self.calc_reward(result_board), ", ", old_reward)
+			print(result_board)
 
 			if lines_cleared > 0:
 				print("lines cleared: ", lines_cleared)
@@ -256,12 +246,12 @@ class TetrisEnv():
 		next_state = np.concatenate((next_state.flatten(), result_info))
 		next_state = next_state.tolist()
 
-		return next_state, reward, self.gameover, {}
+		return next_state, reward, self.gameover, lines_cleared
 
 	def render(self):
 		pass
 
-	def new_stone(self):
+	def new_stone(self, probe=True):
 		self.next_stones.append(rand(1, len(tetris_shapes)+1))
 
 		self.stone = tetris_shapes[self.next_stones[1]-1]
@@ -269,12 +259,18 @@ class TetrisEnv():
 		
 		self.stone_x = int(config['cols'] / 2 - len(self.stone[0])/2)
 		self.stone_y = 0
-		
-		if check_collision(self.board, self.stone, (self.stone_x, self.stone_y)):
-			self.gameover = True
+
+		if probe: return
+
+		for col in self.board[0]:
+			if col == 1:
+				self.gameover = 1
+				break
+		# if check_collision(self.board, self.stone, (self.stone_x, self.stone_y)):
+		# 	self.gameover = 1
 	
 	def init_game(self):
-		self.gameover = False
+		self.gameover = 0
 		self.paused = False
 		self.blocks_placed = 0
 		self.lines_cleared = 0
@@ -284,7 +280,7 @@ class TetrisEnv():
 		self.next_stones.append(rand(1, len(tetris_shapes)+1))
 
 		self.board = new_board()
-		self.new_stone()
+		self.new_stone(probe=False)
 		self.stone_orientation = 0
 
 	def center_msg(self, msg):
@@ -316,13 +312,13 @@ class TetrisEnv():
 	# 						config['cell_size'],
 	# 						config['cell_size']),0)
 	
-	def move_to_placement(self, x_dest):
+	def move_to_placement(self, x_dest, probe=True):
 		delta_x = x_dest - self.stone_x
 		# self.toggle_pause()
 
 		self.move(delta_x)
 		
-		lines_cleared = self.hardDrop()
+		lines_cleared = self.hardDrop(probe)
 
 		# result_board = np.array(self.board)[:20, :]
 		result_board = np.array(self.board, dtype=np.float32)
@@ -345,7 +341,7 @@ class TetrisEnv():
 		pygame.display.update()
 		sys.exit()
 	
-	def drop(self):
+	def drop(self, probe=True):
 		self.stone_y += 1
 		if check_collision(self.board, self.stone, (self.stone_x, self.stone_y)):
 			self.board = join_matrixes(self.board, self.stone, (self.stone_x, self.stone_y))
@@ -358,14 +354,14 @@ class TetrisEnv():
 				else:
 					break
 	
-	def hardDrop(self):
+	def hardDrop(self, probe=True):
 		lines_cleared = 0
 
 		# if not self.gameover and not self.paused:
 		while not check_collision(self.board, self.stone, (self.stone_x, self.stone_y)):
 			self.stone_y += 1
 		self.board = join_matrixes(self.board, self.stone, (self.stone_x, self.stone_y))
-		self.new_stone()
+		self.new_stone(probe)
 		while True:
 			for i, row in enumerate(self.board[:-1]):
 				if 0 not in row:
@@ -388,7 +384,7 @@ class TetrisEnv():
 	# def start_game(self):
 	# 	if self.gameover:
 	# 		self.init_game()
-	# 		self.gameover = False
+	# 		self.gameover = 0
 
 	def set_board(self, board):
 		self.board = board
@@ -412,6 +408,21 @@ class TetrisEnv():
 
 		return bounds
 	
+	def get_next_states(self):
+		obses = []
+		actions = []
+		rewards = []
+		bounds = self.get_movement_bounds()
+
+		for r in range(len(bounds)):
+			for x in range(bounds[r]+1):
+				new_obs, reward, done, info = self.step(x, r, probe=True, display=False)
+				obses.append(new_obs)
+				actions.append(r*10 + x)
+				rewards.append(reward)
+		return [obses, actions]
+		
+		
 	# def run(self):
 	# 	key_actions = {
 	# 		'ESCAPE':	self.quit,

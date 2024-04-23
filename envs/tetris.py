@@ -1,4 +1,3 @@
-import gym
 from gym import spaces
 import numpy as np
 from random import randrange as rand
@@ -89,12 +88,6 @@ def new_board():
 	
 	return np.array(board)
 
-def get_bumpiness(heights):
-	bumpiness = 0
-	for i in range(len(heights)-1):
-		bumpiness += np.abs(heights[i+1] - heights[i])
-	return bumpiness
-
 def get_board_heights(board):
 	boardHeights = []
 
@@ -107,6 +100,12 @@ def get_board_heights(board):
 				boardHeights.append(0)
 
 	return boardHeights
+
+def get_bumpiness(heights):
+	bumpiness = 0
+	for i in range(len(heights)-1):
+		bumpiness += np.abs(heights[i+1] - heights[i])
+	return bumpiness
 
 def get_num_holes(board):
 	holes = 0
@@ -122,7 +121,7 @@ def get_num_holes(board):
 
 	return holes
 
-class TetrisEnv(gym.Env):
+class TetrisEnv():
 	def __init__(self, state_dim=11, action_dim=(10,20)):
 		pygame.init()
 		# pygame.key.set_repeat(250,25)
@@ -145,7 +144,7 @@ class TetrisEnv(gym.Env):
 		# self.screen = pygame.display.set_mode((self.width, self.height))
 		
 		self.action_space = spaces.Discrete(state_dim)
-		self.observation_space = spaces.Box(low=0, high=210, shape=(15,), dtype=np.int32)
+		self.observation_space = spaces.Box(low=0, high=210, shape=(15,), dtype=np.int64)
 		
 		pygame.event.set_blocked(pygame.MOUSEMOTION)
 
@@ -156,7 +155,9 @@ class TetrisEnv(gym.Env):
 		
 		heights = get_board_heights(board)
 		holes = get_num_holes(board)
+		bumpiness = get_bumpiness(heights)
 
+		reward += bumpiness * -0.4
 		reward += sum(heights) * -0.51
 		reward += np.sum(np.abs(np.diff(heights))) * -0.18
 		reward += holes * -0.36
@@ -186,19 +187,23 @@ class TetrisEnv(gym.Env):
 			
 		return False
 
-
 	def reset(self):
 		self.init_game()
 
 		heights = get_board_heights(self.board)
 		holes = get_num_holes(self.board)
+		bumpiness = 0
 
-		result_info = heights
-		result_info.append(holes)
-		result_info.append(self.stone_orientation)
-		result_info.extend(self.next_stones)
+		result_info = np.array(self.next_stones, dtype=np.int64)
+		result_info = np.append(result_info, sum(heights))
+		result_info = np.append(result_info, bumpiness)
+		result_info = np.append(result_info, holes)
 
-		return np.array(result_info, dtype=np.int32)
+		next_state = self.board[:-1].flatten()
+		next_state = np.concatenate((next_state.flatten(), result_info))
+		next_state = next_state.tolist()
+
+		return next_state
 
 	def step(self, x_dest, r_dest, probe, display=False):
 		board_backup = self.board.copy()
@@ -225,14 +230,16 @@ class TetrisEnv(gym.Env):
 		heights = get_board_heights(result_board)
 		bumpiness = get_bumpiness(heights)
 		holes = get_num_holes(result_board)
-		reward = 1 + (self.calc_reward(result_board) - old_reward) + lines_cleared*10
+		reward = 1 + (self.calc_reward(result_board) - old_reward) + 10*lines_cleared**2
 
+		next_state = self.board[:-1]
 		result_info = np.array(self.next_stones, dtype=np.int64)
 		result_info = np.append(result_info, np.sum(heights))
 		result_info = np.append(result_info, bumpiness)
 		result_info = np.append(result_info, holes)
 
 		if display:
+			print(self.calc_reward(result_board), ", ", old_reward)
 			print(self.board)
 
 			if lines_cleared > 0:
@@ -246,7 +253,10 @@ class TetrisEnv(gym.Env):
 			self.stone_y = stone_y_backup
 			self.stone_orientation = stone_orientation_backup
 
-		return np.array(result_info, dtype=np.int64), reward, self.gameover, {}
+		next_state = np.concatenate((next_state.flatten(), result_info))
+		next_state = next_state.tolist()
+
+		return next_state, reward, self.gameover, {}
 
 	def render(self):
 		pass
@@ -313,12 +323,13 @@ class TetrisEnv(gym.Env):
 		self.move(delta_x)
 		
 		lines_cleared = self.hardDrop()
+
 		# result_board = np.array(self.board)[:20, :]
 		result_board = np.array(self.board, dtype=np.float32)
 
 		# self.toggle_pause()
 
-		return np.array([lines_cleared, result_board])
+		return [lines_cleared, self.board]
 	
 	def move(self, delta_x):
 		new_x = self.stone_x + delta_x

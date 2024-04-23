@@ -8,17 +8,18 @@ from alt_dqn import AltDeepQNetwork
 import numpy as np
 from envs import alt_tetris
 
-GAMMA = 0.98
+GAMMA = 0.99
 BATCH_SIZE = 512
-REPLAY_SIZE = 50_000
+REPLAY_SIZE = 30_000
 MIN_REPLAY_SIZE = 1000
 EPSILON_START = 1.00
-EPSILON_END = 0.02
-EPSILON_DECAY = 10_000
-LEARNING_RATE = 5e-4
-TARGET_UPDATE_FREQ = 1000
+EPSILON_END = 1e-3
+EPSILON_DECAY = 2000
+LEARNING_RATE = 1e-3
+TARGET_UPDATE_FREQ = 20
 NUM_ACTIONS = 1
-NUM_EPOCHS = 20_000
+NUM_EPOCHS = 3000
+MAX_EPOCH_STEPS = 3000
 
 env = alt_tetris.TetrisEnv()
 
@@ -26,12 +27,13 @@ replay_memory = deque(maxlen=REPLAY_SIZE)
 reward_memory = deque([0,0], maxlen=100)
 episode_reward = 0.0
 
-policy_net = AltDeepQNetwork(LEARNING_RATE, (21, 10), NUM_ACTIONS, env)
-target_net = AltDeepQNetwork(LEARNING_RATE, (21, 10), NUM_ACTIONS, env)
+policy_net = AltDeepQNetwork(NUM_ACTIONS, env)
+target_net = AltDeepQNetwork(NUM_ACTIONS, env)
 
 target_net.load_state_dict(policy_net.state_dict())
 
 optimizer = torch.optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
+loss_function = nn.MSELoss()
 
 loss_history = []
 reward_history = []
@@ -62,41 +64,59 @@ for _ in range(MIN_REPLAY_SIZE):
 
   obs = new_obs
 
-  if done:
+  if done == 1:
     obs = env.reset()
+  
+epoch = 0
+epoch_step = 0
+episode_lines_cleared = 0
 
 # training loop
-for step in itertools.count():
-  if step == NUM_EPOCHS:
-    break
-
-  epsilon = np.interp(step, [0, EPSILON_DECAY], [EPSILON_START, EPSILON_END])
+while(epoch < NUM_EPOCHS):
+  epsilon = np.interp(epoch, [0, EPSILON_DECAY], [EPSILON_START, EPSILON_END])
 
   rand_sample = random.random()
+  next_states, actions = env.get_next_states()
 
-  best_action = policy_net.act(obs)
   if rand_sample <= epsilon:
-    r = np.random.randint(0, 4)
-    x = np.random.randint(0, env.get_movement_bounds()[r])
-    action = r*10 + x
-    env.step(action%10, int(action/10), False)
+    index = np.random.randint(0, len(actions))
   else:
-    action = best_action
+    input = torch.as_tensor(np.array([t for t in next_states]), dtype=torch.float32)
+    with torch.no_grad():
+      q_values = policy_net(input)
+    index = torch.argmax(q_values).item()
 
-  new_obs, reward, done, info = env.step(best_action%10, int(best_action/10), True)
-  transition = (obs, action, reward, done, new_obs)
+  next_state = next_states[index]
+  action = actions[index]
+
+  new_obs, reward, done, lines_cleared = env.step(action%10, int(action/10), probe=False)
+  transition = (obs, action, reward, done, next_state)
   replay_memory.append(transition)
   reward_history.append(reward)
 
   obs = new_obs
-
   episode_reward += reward
+  episode_lines_cleared += lines_cleared
   
-  if done:
+  if done == 1:
+    epoch += 1
     obs = env.reset()
 
+    print()
+    print("Epoch: ", epoch)
+    print("Reward: ", episode_reward)
+    print("Lines cleared: ", episode_lines_cleared)
+    print("Epsilon: ", epsilon)
+    
     reward_memory.append(episode_reward)
     episode_reward = 0.0
+    episode_lines_cleared = 0
+    epoch_step = 0
+
+  else:
+    epoch_step += 1
+    if epoch_step < MAX_EPOCH_STEPS:
+      continue
 
   # start gradient step
   transitions = random.sample(replay_memory, BATCH_SIZE)
@@ -107,45 +127,36 @@ for step in itertools.count():
   dones = torch.as_tensor(np.asarray([t[3] for t in transitions]), dtype=torch.float32).unsqueeze(-1)
   new_obses = torch.as_tensor(np.array([t[4] for t in transitions]), dtype=torch.float32)
 
-  # target_q_values = feed_batch(new_obses, target_net)
-  target_q_values = target_net(new_obses)
-  # max_target_q_values = target_q_values.max(dim=1, keepdim=True)[0]
-
-  targets = GAMMA * (1 - dones) * (rewards + target_q_values)
-
-  # compute loss
-  # q_values = feed_batch(obses, policy_net)
   q_values = policy_net(obses)
-
-  # action_q_values = torch.gather(input=q_values, dim=1, index=actions)
-
-  loss = nn.functional.smooth_l1_loss(q_values, targets)
-  # loss = nn.MSELoss(q_values, targets)
-
-  # q_value_history.append(policy_net(example_obs).item())
+  with torch.no_grad():
+    target_q_values = policy_net(new_obses)
+  targets = rewards +  (GAMMA * (1 - dones) * (target_q_values))
 
   # gradient descent
   optimizer.zero_grad()
+  loss = loss_function(q_values, targets)
   loss.backward()
-  torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=5.0)
+  # for param in policy_net.parameters():
+  #   if param.grad is not None:
+  #     param.grad.data.clamp_(-1, 1)
   optimizer.step()
 
   loss_history.append(loss.item())
+  print("Loss: ", loss.item())
 
-  # update taret network
-  if step % TARGET_UPDATE_FREQ == 0:
-    target_net.load_state_dict(policy_net.state_dict())
+  # if loss.item() > 50:
+  #   print()
+  #   print(q_values)
+  #   print("done: ", dones)
+  #   print(targets)
+  #   print()
 
-  # logging
-  if step % 1000 == 0:
-    print()
-    print("Step: ", step)
-    print("Average reward: ", np.mean(reward_memory))
-    print("Epsilon: ", epsilon)
+  # #update taret network
+  # if epoch % TARGET_UPDATE_FREQ == 0:
+  #   target_net.load_state_dict(policy_net.state_dict())
 
-  if step == NUM_EPOCHS-1:
-    torch.save(policy_net.state_dict(), "policy_weights.pth")
-    torch.save(target_net.state_dict(), "target_weights.pth")
+torch.save(policy_net.state_dict(), "policy_weights.pth")
+torch.save(target_net.state_dict(), "target_weights.pth")
 
 # plt.plot(q_value_history)
 # plt.savefig('q_value_history.png')

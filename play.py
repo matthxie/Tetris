@@ -2,12 +2,14 @@ import torch
 import numpy as np
 from alt_dqn import AltDeepQNetwork
 from envs import alt_tetris
+from envs import tetris
 
 LEARNING_RATE = 5e-4
 NUM_ACTIONS = 1
 
 env = alt_tetris.TetrisEnv()
-policy_net = AltDeepQNetwork(LEARNING_RATE, (21, 10), NUM_ACTIONS, env)
+# env = tetris.TetrisEnv()
+policy_net = AltDeepQNetwork(NUM_ACTIONS, env)
 policy_net.load_state_dict(torch.load("policy_weights.pth",  map_location=torch.device('cpu')))
 
 def act(obs):
@@ -38,18 +40,29 @@ obs = env.reset()
 
 # new_obs, reward, done, info = env.step(2, 2, True)
 
-for i in range(20):
+
+total_reward = 0
+total_lines_cleared = 0
+
+for i in range(1000):
     # print(env.board)
 
     action = act(obs)
 
     r = int(action/10)
     x = action%10
-    new_obs, reward, done, info = env.step(x, r, probe=False, display=True)
+    new_obs, reward, done, lines_cleared  = env.step(x, r, probe=False, display=True)
+    total_reward += reward - 1
+    total_lines_cleared += lines_cleared
 
-    if done:
+    if done == 1:
+      print("lines cleared: ", total_lines_cleared)
+      print("reward: ", total_reward)
       print("------------------------------------------------------")
-      print(i)
       new_obs = env.reset()
+      total_reward = 0
+      total_lines_cleared = 0
+
+      break
 
     obs = new_obs
