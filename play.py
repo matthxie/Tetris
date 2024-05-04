@@ -4,6 +4,10 @@ from alt_dqn import AltDeepQNetwork
 from envs import alt_tetris
 from envs import tetris
 
+torch.set_default_device('cuda')
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
 LEARNING_RATE = 5e-4
 NUM_ACTIONS = 1
 

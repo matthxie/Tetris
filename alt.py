@@ -1,12 +1,19 @@
+import math
 import torch
 import torch.nn as nn
 from collections import deque
-import itertools
-import random
-import matplotlib.pyplot as plt
-from alt_dqn import AltDeepQNetwork
 import numpy as np
+import random
+from alt_dqn import AltDeepQNetwork
 from envs import alt_tetris
+from torch.utils.tensorboard import SummaryWriter
+
+torch.set_default_device('cuda')
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+writer = SummaryWriter()
 
 GAMMA = 0.99
 BATCH_SIZE = 512
@@ -15,41 +22,68 @@ MIN_REPLAY_SIZE = 1000
 EPSILON_START = 1.00
 EPSILON_END = 1e-3
 EPSILON_DECAY = 2000
+EPSILON_DECAY_RATE = 0.998
 LEARNING_RATE = 1e-3
-TARGET_UPDATE_FREQ = 20
+LEARNING_RATE_DECAY = 0.9
+LEARNING_RATE_DECAY_FREQ = 500
 NUM_ACTIONS = 1
 NUM_EPOCHS = 3000
-MAX_EPOCH_STEPS = 3000
+MAX_EPOCH_STEPS = 2000
+TAU = 0.005
+TARGET_UPDATE_FREQ = 500
+SAVE_FREQ = 1000
 
 env = alt_tetris.TetrisEnv()
 
 replay_memory = deque(maxlen=REPLAY_SIZE)
 reward_memory = deque([0,0], maxlen=100)
 episode_reward = 0.0
+episode_losses = []
 
-policy_net = AltDeepQNetwork(NUM_ACTIONS, env)
-target_net = AltDeepQNetwork(NUM_ACTIONS, env)
+policy_net = AltDeepQNetwork(NUM_ACTIONS, env).to(device)
+target_net = AltDeepQNetwork(NUM_ACTIONS, env).to(device)
 
 target_net.load_state_dict(policy_net.state_dict())
 
-optimizer = torch.optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
-loss_function = nn.MSELoss()
+policy_net.train()
+target_net.train()
 
-loss_history = []
-reward_history = []
-q_value_history = []
+optimizer = torch.optim.AdamW(policy_net.parameters(), lr=LEARNING_RATE, amsgrad=True)
+criterion = nn.SmoothL1Loss()
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10)
 
-example_obs = torch.tensor(np.array([4,5,4,3,3,2]))
+example_obs = torch.tensor(np.array([4,5,4,3,3,2])).to(device)
 
 obs = env.reset()
 
-def feed_batch(batch, net):
-  output = []
+def sigmoid(x):
+  s = max(1/(1+np.exp(0.001*(x-2600))), 0.001)
+  if s < 0.11:
+    s = 0.01
+  return s
 
-  for i in range(BATCH_SIZE):
-    output.append(net(batch[i]))
+def get_lr(optimizer):
+  for g in optimizer.param_groups:
+      return(g['lr'])
+  
+def calculate_priority():
+  obses = torch.as_tensor(np.array([m[0] for m in replay_memory]), dtype=torch.float32).to(device)
+  rewards = torch.as_tensor(np.array([m[2] for m in replay_memory]), dtype=torch.float32).to(device)
+  new_obses = torch.as_tensor(np.array([m[4] for m in replay_memory]), dtype=torch.float32).to(device)
 
-  return torch.stack(output, dim=0)
+  target_net.eval()
+  policy_net.eval()
+  with torch.no_grad():
+    estimates = policy_net(obses)
+    targets = target_net(new_obses)
+  policy_net.train()
+  target_net.train()
+
+  priorities = np.array(np.abs(estimates - rewards - targets))
+  probabilities = priorities / np.sum(priorities)
+  replay_memory = np.array(replay_memory)
+  replay_memory[:, 5] = probabilities
+  replay_memory = deque(map(tuple, replay_memory))
 
 # init replay memory
 for _ in range(MIN_REPLAY_SIZE):
@@ -60,39 +94,40 @@ for _ in range(MIN_REPLAY_SIZE):
   new_obs, reward, done, info = env.step(x, r, False)
   transition = (obs, action, reward, done, new_obs)
   replay_memory.append(transition)
-  reward_memory.append(transition[2])
 
   obs = new_obs
 
   if done == 1:
     obs = env.reset()
-  
+
+# training
 epoch = 0
 epoch_step = 0
 episode_lines_cleared = 0
+epsilon = EPSILON_START
+obs = env.reset()
 
 # training loop
 while(epoch < NUM_EPOCHS):
-  epsilon = np.interp(epoch, [0, EPSILON_DECAY], [EPSILON_START, EPSILON_END])
-
   rand_sample = random.random()
   next_states, actions = env.get_next_states()
 
   if rand_sample <= epsilon:
     index = np.random.randint(0, len(actions))
   else:
-    input = torch.as_tensor(np.array([t for t in next_states]), dtype=torch.float32)
+    input = torch.as_tensor(np.array([t for t in next_states]), dtype=torch.float32).to(device)
+    policy_net.eval()
     with torch.no_grad():
       q_values = policy_net(input)
+    policy_net.train()
     index = torch.argmax(q_values).item()
 
   next_state = next_states[index]
   action = actions[index]
 
   new_obs, reward, done, lines_cleared = env.step(action%10, int(action/10), probe=False)
-  transition = (obs, action, reward, done, next_state)
+  transition = (obs, action, reward, done, next_state, 0)
   replay_memory.append(transition)
-  reward_history.append(reward)
 
   obs = new_obs
   episode_reward += reward
@@ -101,66 +136,78 @@ while(epoch < NUM_EPOCHS):
   if done == 1:
     epoch += 1
     obs = env.reset()
-
-    print()
-    print("Epoch: ", epoch)
-    print("Reward: ", episode_reward)
-    print("Lines cleared: ", episode_lines_cleared)
-    print("Epsilon: ", epsilon)
     
     reward_memory.append(episode_reward)
-    episode_reward = 0.0
-    episode_lines_cleared = 0
-    epoch_step = 0
 
   else:
     epoch_step += 1
     if epoch_step < MAX_EPOCH_STEPS:
       continue
 
-  # start gradient step
+  # sample from replay memory
   transitions = random.sample(replay_memory, BATCH_SIZE)
 
-  obses = torch.as_tensor(np.array([t[0] for t in transitions]), dtype=torch.float32)
-  actions = torch.as_tensor(np.asarray([t[1] for t in transitions]), dtype=torch.int64).unsqueeze(-1)
-  rewards = torch.as_tensor(np.asarray([t[2] for t in transitions]), dtype=torch.float32).unsqueeze(-1)
-  dones = torch.as_tensor(np.asarray([t[3] for t in transitions]), dtype=torch.float32).unsqueeze(-1)
-  new_obses = torch.as_tensor(np.array([t[4] for t in transitions]), dtype=torch.float32)
+  obses = torch.as_tensor(np.array([t[0] for t in transitions]), dtype=torch.float32).to(device)
+  actions = torch.as_tensor(np.asarray([t[1] for t in transitions]), dtype=torch.int64).unsqueeze(-1).to(device)
+  rewards = torch.as_tensor(np.asarray([t[2] for t in transitions]), dtype=torch.float32).unsqueeze(-1).to(device)
+  dones = torch.as_tensor(np.asarray([t[3] for t in transitions]), dtype=torch.float32).unsqueeze(-1).to(device)
+  new_obses = torch.as_tensor(np.array([t[4] for t in transitions]), dtype=torch.float32).to(device)
 
+  # calculate targets and q-values
+  policy_net.eval()
+  target_net.eval()
   q_values = policy_net(obses)
   with torch.no_grad():
-    target_q_values = policy_net(new_obses)
+    target_q_values = target_net(new_obses)
+  policy_net.train()
+  target_net.train()
   targets = rewards +  (GAMMA * (1 - dones) * (target_q_values))
 
   # gradient descent
+  loss = criterion(q_values, targets)
   optimizer.zero_grad()
-  loss = loss_function(q_values, targets)
   loss.backward()
-  # for param in policy_net.parameters():
-  #   if param.grad is not None:
-  #     param.grad.data.clamp_(-1, 1)
+  torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
   optimizer.step()
+  # scheduler.step(loss)
 
-  loss_history.append(loss.item())
+  # logs
+  print()
+  print("Epoch: ", epoch)
+  print("Reward: ", episode_reward)
+  print("Lines cleared: ", episode_lines_cleared)
+  print("Epsilon: ", epsilon)
+  print("LR: ", get_lr(optimizer))
   print("Loss: ", loss.item())
 
-  # if loss.item() > 50:
-  #   print()
-  #   print(q_values)
-  #   print("done: ", dones)
-  #   print(targets)
-  #   print()
+  writer.add_scalar("Reward", episode_reward, epoch)
+  writer.add_scalar("Lines Cleared", episode_lines_cleared, epoch)
+  writer.add_scalar("Epsilon", epsilon, epoch)
+  writer.add_scalar("Learning Rate", get_lr(optimizer), epoch)
+  writer.add_scalar("Loss", loss.item(), epoch)
+  writer.flush()
 
-  # #update taret network
-  # if epoch % TARGET_UPDATE_FREQ == 0:
-  #   target_net.load_state_dict(policy_net.state_dict())
+  epoch_step = 0
+  episode_reward = 0.0
+  episode_lines_cleared = 0
+  # epsilon = sigmoid(epoch)
+  epsilon = np.interp(epoch, [0, EPSILON_DECAY], [EPSILON_START, EPSILON_END])
+  # epsilon = EPSILON_END + (EPSILON_START - EPSILON_END) * math.exp(-1. * epoch / EPSILON_DECAY)
+
+  # update taret network
+  if epoch % TARGET_UPDATE_FREQ == 0:
+    target_net.load_state_dict(policy_net.state_dict())
+
+  # target_net_state_dict = target_net.state_dict()
+  # policy_net_state_dict = policy_net.state_dict()
+  # for key in policy_net_state_dict:
+  #   target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
+  # target_net.load_state_dict(target_net_state_dict)
+
+  # save model at interval
+  if epoch % SAVE_FREQ == 0 and epoch >= SAVE_FREQ:
+    torch.save(policy_net.state_dict(), "policy_weights.pth")
+    torch.save(target_net.state_dict(), "target_weights.pth")
 
 torch.save(policy_net.state_dict(), "policy_weights.pth")
 torch.save(target_net.state_dict(), "target_weights.pth")
-
-# plt.plot(q_value_history)
-# plt.savefig('q_value_history.png')
-plt.plot(loss_history)
-plt.savefig('loss_history.png')
-plt.plot(reward_history)
-plt.savefig('reward_history.png')

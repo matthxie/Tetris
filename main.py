@@ -8,6 +8,12 @@ from DQN import DeepQNetwork
 import numpy as np
 from envs import tetris
 
+torch.set_default_device('cuda')
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
 GAMMA = 0.98
 BATCH_SIZE = 512
 REPLAY_SIZE = 50_000
@@ -17,7 +23,7 @@ EPSILON_END = 0.02
 EPSILON_DECAY = 10_000
 LEARNING_RATE = 5e-4
 TARGET_UPDATE_FREQ = 1000
-NUM_ACTIONS = 40
+NUM_ACTIONS = 10
 NUM_EPOCHS = 20_000
 
 env = tetris.TetrisEnv()
@@ -26,24 +32,26 @@ replay_memory = deque(maxlen=REPLAY_SIZE)
 reward_memory = deque([0,0], maxlen=100)
 episode_reward = 0.0
 
-policy_net = DeepQNetwork(LEARNING_RATE, (21, 10), NUM_ACTIONS, env)
-target_net = DeepQNetwork(LEARNING_RATE, (21, 10), NUM_ACTIONS, env)
+policy_net = DeepQNetwork(LEARNING_RATE, NUM_ACTIONS, env).to(device)
+target_net = DeepQNetwork(LEARNING_RATE, NUM_ACTIONS, env).to(device)
 
 target_net.load_state_dict(policy_net.state_dict())
 
 optimizer = torch.optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
+criterion = nn.MSELoss()
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.999, patience=10)
 
 loss_history = []
 reward_history = []
 q_value_history = []
 
-example_obs = torch.tensor(np.array([4,5,4,3,3,2]))
+example_obs = torch.tensor(np.array([4,5,4,3,3,2])).to(device)
 
 obs = env.reset()
 
-def invalid_states_mask(bounds):
-  output = []
-
+def get_lr(optimizer):
+  for g in optimizer.param_groups:
+      return(g['lr'])
 
 # init replay memory
 for _ in range(MIN_REPLAY_SIZE):
@@ -100,27 +108,27 @@ for step in itertools.count():
 
   obses = torch.as_tensor(np.array([t[0] for t in transitions]), dtype=torch.float32)
   actions = torch.as_tensor(np.asarray([t[1] for t in transitions]), dtype=torch.int64).unsqueeze(-1)
-  rewards = torch.as_tensor(np.asarray([t[2] for t in transitions]), dtype=torch.float32).unsqueeze(-1)
-  dones = torch.as_tensor(np.asarray([t[3] for t in transitions]), dtype=torch.float32).unsqueeze(-1)
-  new_obses = torch.as_tensor(np.array([t[4] for t in transitions]), dtype=torch.float32)
+  rewards = torch.as_tensor(np.asarray([t[2] for t in transitions]), dtype=torch.float32).unsqueeze(-1).to(device)
+  dones = torch.as_tensor(np.asarray([t[3] for t in transitions]), dtype=torch.float32).unsqueeze(-1).to(device)
+  new_obses = torch.as_tensor(np.array([t[4] for t in transitions]), dtype=torch.float32).to(device)
 
   target_q_values = target_net(new_obses)
   max_target_q_values = target_q_values.max(dim=1, keepdim=True)[0]
-
   targets = rewards + GAMMA * (1 - dones) * (max_target_q_values)
 
   # compute loss
   q_values = policy_net(obses)
   action_q_values = torch.gather(input=q_values, dim=1, index=actions)
 
-  loss = nn.functional.smooth_l1_loss(action_q_values, targets)
+  # loss = nn.functional.smooth_l1_loss(action_q_values, targets)
 
-  print(loss)
+  # print(loss)
 
   # q_value_history.append(policy_net(example_obs).item())
 
   # gradient descent
   optimizer.zero_grad()
+  loss = nn.MSELoss(action_q_values, targets)
   loss.backward()
   torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=5.0)
   optimizer.step()

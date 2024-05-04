@@ -4,31 +4,60 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 
+torch.set_default_device('cuda')
+torch.set_default_tensor_type('torch.cuda.FloatTensor')
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
 class AltDeepQNetwork(nn.Module):
   def __init__(self, output_dim, env):
-    super().__init__()
+    super(AltDeepQNetwork, self).__init__()
     self.env = env
     
-    self.n_actions = output_dim
-
     self.relu = nn.ReLU()
+    self.flatten = nn.Flatten()
+    self.cnn_1 = nn.Sequential(
+      nn.Conv2d(in_channels=1, out_channels=32, kernel_size=(3,3), stride=1, padding=2),
+      nn.BatchNorm2d(32),
+      nn.ReLU(),
+      nn.Conv2d(in_channels=32, out_channels=32, kernel_size=(3,3), stride=1, padding=2),
+      nn.BatchNorm2d(32),
+      nn.ReLU(),
+      nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(3,3), stride=1, padding=2),
+      nn.BatchNorm2d(64),
+      nn.ReLU(),
+      nn.Conv2d(in_channels=64, out_channels=64, kernel_size=(20, 1), stride=1, padding=0),
+      nn.BatchNorm2d(64),
+      nn.ReLU()
+    )
+    self.cnn_2 = nn.Sequential(
+      nn.Conv2d(in_channels=64, out_channels=128, kernel_size=(3,3), stride=1, padding=2),
+      nn.BatchNorm2d(128),
+      nn.ReLU(),
+      nn.Conv2d(in_channels=128, out_channels=128, kernel_size=(1,1), stride=1, padding=0),
+      nn.BatchNorm2d(128),
+      nn.ReLU(),
+      nn.Conv2d(in_channels=128, out_channels=128, kernel_size=(3,3), stride=1, padding=2),
+      nn.BatchNorm2d(128),
+      nn.ReLU()
+    )
+    self.fc = nn.Sequential(
+      nn.Linear(28166, 128),
+      nn.ReLU(),
+      nn.Linear(128, 512),
+      nn.ReLU(),
+      nn.Linear(512, output_dim)
+    )
 
-    self.conv1 = nn.Conv2d(in_channels=1, out_channels=128, kernel_size=4, stride=1, padding=0)
-    self.conv2 = nn.Conv2d(in_channels=128, out_channels=32, kernel_size=(3,3), stride=1, padding=0)
-
-    self.conv3 = nn.Conv2d(in_channels=1, out_channels=64, kernel_size=6, stride=1, padding=0)
-    self.conv4 = nn.Conv2d(in_channels=64, out_channels=32, kernel_size=(3,3), stride=1, padding=0)
-    
-    self.pool1 = nn.MaxPool2d(kernel_size=(15, 5))
-    self.pool2 = nn.MaxPool2d(kernel_size=(13, 3))
-
-    self.fc1 = nn.Linear(70, 128)
-    self.fc2 = nn.Linear(128, 64)
-    self.fc3 = nn.Linear(64, output_dim)
-
-    self.fc1_ = nn.Sequential(nn.Linear(6, 128), nn.ReLU(inplace=True))
-    self.fc2_ = nn.Sequential(nn.Linear(128, 128), nn.ReLU(inplace=True))
-    self.fc3_ = nn.Sequential(nn.Linear(128, 1))
+    self.fc0 = nn.Sequential(
+      nn.Linear(6, 64), 
+      nn.ReLU(),
+      nn.Linear(64, 64),
+      nn.ReLU(),
+      nn.Linear(64, 1)
+    )
 
     self.create_weights()
 
@@ -43,29 +72,18 @@ class AltDeepQNetwork(nn.Module):
     x0 = x0.view(x.size(0), 20, 10).unsqueeze(1)
     x1 = x[:, -6:]
 
-    # x0_a = self.relu(self.conv1(x0))
-    # x0_a = self.relu(self.conv2(x0_a))
-    # x0_a = self.pool1(x0_a)
-    # x0_a = x0_a.view(x.size(0), -1)
+    # x = self.cnn_1(x0)
+    # x = self.cnn_2(x)
+    # x = torch.flatten(x, 1)
+    # x = torch.cat((x, x1), 1)
+    # x = self.fc(x)
 
-    # x0_b = self.relu(self.conv3(x0))
-    # x0_b = self.relu(self.conv4(x0_b))
-    # x0_b = self.pool2(x0_b)
-    # x0_b = x0_a.view(x.size(0), -1)
-
-    # x = torch.cat((x0_a, x0_b, x1), dim=1)
-
-    # x = self.relu(self.fc1(x))
-    # x = self.relu(self.fc2(x))
-    # x = (self.fc3(x))
-
-    x = self.fc1_(x1)
-    x = self.fc2_(x)
-    x = self.fc3_(x)
+    x = self.fc0(x1)
 
     return x
   
   def act(self, obs):
+    print("aowerfhaw;ofhawe;foiuhawefl;uh")
     obs = torch.as_tensor(obs, dtype=torch.float32)
 
     obs_ = []
