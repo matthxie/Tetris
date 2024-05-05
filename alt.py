@@ -21,7 +21,7 @@ REPLAY_SIZE = 30_000
 MIN_REPLAY_SIZE = 1000
 EPSILON_START = 1.00
 EPSILON_END = 1e-3
-EPSILON_DECAY = 2000
+EPSILON_DECAY = 2100
 EPSILON_DECAY_RATE = 0.998
 LEARNING_RATE = 1e-3
 LEARNING_RATE_DECAY = 0.9
@@ -31,12 +31,14 @@ NUM_EPOCHS = 3000
 MAX_EPOCH_STEPS = 2000
 TAU = 0.005
 TARGET_UPDATE_FREQ = 500
-SAVE_FREQ = 1000
+SAVE_FREQ = 500
 
 env = alt_tetris.TetrisEnv()
 
 replay_memory = deque(maxlen=REPLAY_SIZE)
-reward_memory = deque([0,0], maxlen=100)
+reward_memory = deque(maxlen=10)
+reward_avg = 0
+reward_avg_bench = 2500
 episode_reward = 0.0
 episode_losses = []
 
@@ -208,6 +210,13 @@ while(epoch < NUM_EPOCHS):
   if epoch % SAVE_FREQ == 0 and epoch >= SAVE_FREQ:
     torch.save(policy_net.state_dict(), "policy_weights.pth")
     torch.save(target_net.state_dict(), "target_weights.pth")
+
+  # save model passing benchmark
+  avg = np.mean(np.array(reward_memory))
+  if avg > reward_avg_bench and avg > reward_avg:
+    torch.save(policy_net.state_dict(), "optimal_policy_weights.pth")
+    torch.save(target_net.state_dict(), "optimal_target_weights.pth")
+    reward_avg = avg
 
 torch.save(policy_net.state_dict(), "policy_weights.pth")
 torch.save(target_net.state_dict(), "target_weights.pth")
