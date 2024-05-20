@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 from collections import deque
@@ -8,7 +7,6 @@ from alt_dqn import AltDeepQNetwork
 from envs import alt_tetris
 from torch.utils.tensorboard import SummaryWriter
 
-torch.set_default_device('cuda')
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
@@ -21,7 +19,7 @@ REPLAY_SIZE = 30_000
 MIN_REPLAY_SIZE = 1000
 EPSILON_START = 1.00
 EPSILON_END = 1e-3
-EPSILON_DECAY = 2100
+EPSILON_DECAY = 2000
 EPSILON_DECAY_RATE = 0.998
 LEARNING_RATE = 1e-3
 LEARNING_RATE_DECAY = 0.9
@@ -54,30 +52,27 @@ optimizer = torch.optim.AdamW(policy_net.parameters(), lr=LEARNING_RATE, amsgrad
 criterion = nn.SmoothL1Loss()
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10)
 
-example_obs = torch.tensor(np.array([4,5,4,3,3,2])).to(device)
+example_state = torch.tensor(np.array([4,5,4,3,3,2])).to(device)
 
-obs = env.reset()
+state = env.reset()
 
 def sigmoid(x):
-  s = max(1/(1+np.exp(0.001*(x-2600))), 0.001)
-  if s < 0.11:
-    s = 0.01
-  return s
+  return 1/(1+np.exp(-1*(x-10)))
 
 def get_lr(optimizer):
   for g in optimizer.param_groups:
       return(g['lr'])
   
 def calculate_priority():
-  obses = torch.as_tensor(np.array([m[0] for m in replay_memory]), dtype=torch.float32).to(device)
+  states = torch.as_tensor(np.array([m[0] for m in replay_memory]), dtype=torch.float32).to(device)
   rewards = torch.as_tensor(np.array([m[2] for m in replay_memory]), dtype=torch.float32).to(device)
-  new_obses = torch.as_tensor(np.array([m[4] for m in replay_memory]), dtype=torch.float32).to(device)
+  new_states = torch.as_tensor(np.array([m[4] for m in replay_memory]), dtype=torch.float32).to(device)
 
   target_net.eval()
   policy_net.eval()
   with torch.no_grad():
-    estimates = policy_net(obses)
-    targets = target_net(new_obses)
+    estimates = policy_net(states)
+    targets = target_net(new_states)
   policy_net.train()
   target_net.train()
 
@@ -93,21 +88,21 @@ for _ in range(MIN_REPLAY_SIZE):
   x = np.random.randint(0, env.get_movement_bounds()[r])
   action = r*10 + x
 
-  new_obs, reward, done, info = env.step(x, r, False)
-  transition = (obs, action, reward, done, new_obs)
+  new_state, reward, done, info = env.step(x, r, False)
+  transition = (state, action, reward, done, new_state)
   replay_memory.append(transition)
 
-  obs = new_obs
+  state = new_state
 
   if done == 1:
-    obs = env.reset()
+    state = env.reset()
 
 # training
 epoch = 0
 epoch_step = 0
 episode_lines_cleared = 0
 epsilon = EPSILON_START
-obs = env.reset()
+state = env.reset()
 
 # training loop
 while(epoch < NUM_EPOCHS):
@@ -127,17 +122,17 @@ while(epoch < NUM_EPOCHS):
   next_state = next_states[index]
   action = actions[index]
 
-  new_obs, reward, done, lines_cleared = env.step(action%10, int(action/10), probe=False)
-  transition = (obs, action, reward, done, next_state, 0)
+  new_state, reward, done, lines_cleared = env.step(action%10, int(action/10), probe=False)
+  transition = (state, action, reward, done, next_state, 0)
   replay_memory.append(transition)
 
-  obs = new_obs
+  state = new_state
   episode_reward += reward
   episode_lines_cleared += lines_cleared
   
   if done == 1:
     epoch += 1
-    obs = env.reset()
+    state = env.reset()
     
     reward_memory.append(episode_reward)
 
@@ -149,18 +144,18 @@ while(epoch < NUM_EPOCHS):
   # sample from replay memory
   transitions = random.sample(replay_memory, BATCH_SIZE)
 
-  obses = torch.as_tensor(np.array([t[0] for t in transitions]), dtype=torch.float32).to(device)
+  states = torch.as_tensor(np.array([t[0] for t in transitions]), dtype=torch.float32).to(device)
   actions = torch.as_tensor(np.asarray([t[1] for t in transitions]), dtype=torch.int64).unsqueeze(-1).to(device)
   rewards = torch.as_tensor(np.asarray([t[2] for t in transitions]), dtype=torch.float32).unsqueeze(-1).to(device)
   dones = torch.as_tensor(np.asarray([t[3] for t in transitions]), dtype=torch.float32).unsqueeze(-1).to(device)
-  new_obses = torch.as_tensor(np.array([t[4] for t in transitions]), dtype=torch.float32).to(device)
+  new_states = torch.as_tensor(np.array([t[4] for t in transitions]), dtype=torch.float32).to(device)
 
   # calculate targets and q-values
   policy_net.eval()
   target_net.eval()
-  q_values = policy_net(obses)
+  q_values = policy_net(states)
   with torch.no_grad():
-    target_q_values = target_net(new_obses)
+    target_q_values = target_net(new_states)
   policy_net.train()
   target_net.train()
   targets = rewards +  (GAMMA * (1 - dones) * (target_q_values))

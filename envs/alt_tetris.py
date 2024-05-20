@@ -99,6 +99,7 @@ def get_bumpiness(heights):
 	nexts = np.array(heights[1:])
 	diffs = np.abs(currs - nexts)
 	total_bumpiness = np.sum(diffs)
+
 	return total_bumpiness
 
 def get_num_holes(board):
