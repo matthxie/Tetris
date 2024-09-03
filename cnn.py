@@ -1,7 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import ViTImageProcessor, ViTForImageClassification
+
+def xavier_init(net: nn.Module):
+    for m in net.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.constant_(m.bias, 0)
 
 class FFN(nn.Module):
     def __init__(self, dim0, dim1, dim2, dim3) -> None:
@@ -13,6 +18,7 @@ class FFN(nn.Module):
             F.gelu(),
             nn.Linear(dim2, dim3)
         )
+        xavier_init(self)
     
     def forward(self, x):
         return self.ffn(x)
@@ -27,6 +33,8 @@ class CNNEncoder(nn.Module):
         
         self.fc1 = nn.Linear(128 * 8 * 8, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, output_dim)
+
+        xavier_init(self)
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
@@ -45,29 +53,19 @@ class GABA(nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-        self.processor = ViTImageProcessor.from_pretrained('google/vit-base-patch16-224')
-        self.vit = ViTForImageClassification.from_pretrained('google/vit-base-patch16-224')
-
         self.expert1 = FFN(10, 32, 32, 3)
         self.expert2 = FFN(10, 32, 32, 3)
         self.expert3 = FFN(10, 32, 32, 3)
-        self.expert4 = FFN(30, 64, 64, 3)
+
+        self.router = FFN(30, 64, 64, 3)
 
         self.cnn_encoder = CNNEncoder(1, 64, 10)
 
     def forward(self, x):
-        # inputs = self.processor(images=x, return_tensors="pt")
-        # outputs = self.vit(**inputs)
-        # logits = outputs.logits
-
         logits = self.cnn_encoder(x)
 
-        expert_output1 = self.expert1(logits)
-        expert_output2 = self.expert2(logits)
-        expert_output3 = self.expert3(logits)
-        expert_output4 = self.expert4(logits)
+        router_out = self.router(logits)
 
-        
-
-        
-
+        expert_out1 = self.expert1(logits)
+        expert_out2 = self.expert2(logits)
+        expert_out3 = self.expert3(logits)
