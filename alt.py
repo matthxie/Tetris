@@ -123,7 +123,7 @@ state = env.reset()
 progress_bar = tqdm(range(NUM_STEPS), desc="Training Progress")
 
 # training loop
-while step_count < NUM_STEPS:
+for i in tqdm(range(NUM_STEPS)):
     rand_sample = random.random()
     valid_moves_mask = torch.tensor(env.get_invalid_moves()).unsqueeze(0)
 
@@ -157,13 +157,12 @@ while step_count < NUM_STEPS:
     if done == 1:
         epoch += 1
         state = env.reset()
-
         reward_memory.append(episode_reward)
-
     else:
         epoch_step += 1
         if epoch_step < MAX_EPOCH_STEPS:
             continue
+    step_count += 1
 
     # sample from replay memory
     transitions = random.sample(replay_memory, BATCH_SIZE)
@@ -269,8 +268,6 @@ while step_count < NUM_STEPS:
         torch.save(policy_net.state_dict(), "optimal_policy_weights.pth")
         torch.save(target_net.state_dict(), "optimal_target_weights.pth")
         reward_avg = avg
-
-    step_count += 1
 
 torch.save(policy_net.state_dict(), "policy_weights.pth")
 torch.save(target_net.state_dict(), "target_weights.pth")
