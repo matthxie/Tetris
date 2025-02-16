@@ -40,9 +40,10 @@ class AltDeepQNetwork(nn.Module):
                 padding=0,
             ),
             nn.ReLU(),
+            nn.Flatten(),
         )
         self.fc = nn.Sequential(
-            nn.Linear(64 + 6, 64),
+            nn.Linear(64 + 3 * 7, 64),
             nn.ReLU(),
             nn.Linear(64, output_dim),
         )
@@ -60,14 +61,20 @@ class AltDeepQNetwork(nn.Module):
                 nn.init.xavier_uniform_(m.weight)
                 nn.init.constant_(m.bias, 0)
 
+    def convert_info(self, next_blocks):
+        next_blocks = torch.tensor(next_blocks[:, :-3]).long() - 1
+        one_hot = torch.nn.functional.one_hot(next_blocks, num_classes=7).flatten()
+        return one_hot.view(next_blocks.shape[0], -1)
+
     def forward(self, x):
         x0 = x[:, :-6]
         x0 = x0.view(x.size(0), 20, 10).unsqueeze(1)
         x1 = x[:, -6:]
+        x1 = self.convert_info(x1)
 
         x = self.cnn(x0)
-        x = torch.flatten(x, 1)
         x = self.fc0(x)
+
         x = torch.cat((x, x1), 1)
         x = self.fc(x)
 
@@ -96,17 +103,5 @@ class AltDeepQNetwork(nn.Module):
 
         max_q_index = torch.argmax(q_values)
         action = max_q_index.detach().item()
-
-        # new_state, reward, done, info = self.env.step(actions[action]%10, int(actions[action]/10), probe=True, display=False)
-
-        # x0 = np.array(new_state[:-6])
-        # x0 = x0.reshape(20, 10).tolist()
-
-        # for row in x0:
-        #   print(row)
-        # print(new_state[-6:])
-        # print()
-
-        # print("x: ", actions[action]%10, "r: ", int(actions[action]/10), ", ", rewards[action])
 
         return actions[action] % 10 + int(actions[action] / 10)

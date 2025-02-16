@@ -8,19 +8,13 @@ from envs import alt_tetris
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-# writer = SummaryWriter()
-
 GAMMA = 0.99
 BATCH_SIZE = 64
 REPLAY_SIZE = 300_000
 MIN_REPLAY_SIZE = 50_000
 EPSILON_START = 1.00
 EPSILON_END = 1e-3
-EPSILON_DECAY = 10_000
+EPSILON_DECAY = 20_000
 EPSILON_DECAY_RATE = 0.998
 LEARNING_RATE = 1e-3
 LEARNING_RATE_DECAY = 0.9
@@ -32,6 +26,12 @@ MAX_EPOCH_STEPS = 8000
 TAU = 0.005
 TARGET_UPDATE_FREQ = 10_000
 SAVE_FREQ = 10_000
+
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+# writer = SummaryWriter()
 
 env = alt_tetris.TetrisEnv()
 
@@ -95,15 +95,17 @@ def calculate_priority():
 
 
 # init replay memory
+print("Initializing memory replay: size", MIN_REPLAY_SIZE)
+
 for _ in range(MIN_REPLAY_SIZE):
-    valid_moves_mask = torch.tensor(env.get_invalid_moves())
+    valid_moves_mask = torch.tensor(env.get_invalid_moves()).unsqueeze(0)
 
     action = np.random.randint(0, 40)
-    while valid_moves_mask[action] == False:
+    while valid_moves_mask[0, action] == False:
         action = np.random.randint(0, 40)
 
     new_state, reward, done, info = env.step(action % 10, int(action / 10), probe=False)
-    transition = (state, action, reward, done, new_state)
+    transition = (state, action, reward, done, new_state, valid_moves_mask)
     replay_memory.append(transition)
 
     state = new_state
@@ -118,9 +120,10 @@ step_count = 0
 episode_lines_cleared = 0
 epsilon = EPSILON_START
 state = env.reset()
+progress_bar = tqdm(range(NUM_STEPS), desc="Training Progress")
 
 # training loop
-while epoch < NUM_EPOCHS:
+while step_count < NUM_STEPS:
     rand_sample = random.random()
     valid_moves_mask = torch.tensor(env.get_invalid_moves()).unsqueeze(0)
 
@@ -144,7 +147,7 @@ while epoch < NUM_EPOCHS:
     new_state, reward, done, lines_cleared = env.step(
         action % 10, int(action / 10), probe=False
     )
-    transition = (state, action, reward, done, new_state, 0)
+    transition = (state, action, reward, done, new_state, valid_moves_mask)
     replay_memory.append(transition)
 
     state = new_state
@@ -186,11 +189,17 @@ while epoch < NUM_EPOCHS:
     new_states = torch.as_tensor(
         np.array([t[4] for t in transitions]), dtype=torch.float32
     ).to(device)
+    valid_moves = (
+        torch.as_tensor(np.array([t[5] for t in transitions]), dtype=torch.bool)
+        .squeeze(1)
+        .to(device)
+    )
 
     # calculate targets and q-values
     policy_net.eval()
     target_net.eval()
     q_values = policy_net(states)
+    q_values[valid_moves] = -float("inf")
     with torch.no_grad():
         target_q_values = target_net(new_states)
     policy_net.train()
@@ -206,13 +215,13 @@ while epoch < NUM_EPOCHS:
     # scheduler.step(loss)
 
     # logs
-    print()
-    print("Epoch: ", epoch)
-    print("Reward: ", episode_reward)
-    print("Lines cleared: ", episode_lines_cleared)
-    print("Epsilon: ", epsilon)
-    print("LR: ", get_lr(optimizer))
-    print("Loss: ", loss.item())
+    # print()
+    # print("Epoch: ", epoch)
+    # print("Reward: ", episode_reward)
+    # print("Lines cleared: ", episode_lines_cleared)
+    # print("Epsilon: ", epsilon)
+    # print("LR: ", get_lr(optimizer))
+    # print("Loss: ", loss.item())
 
     # writer.add_scalar("Reward", episode_reward, epoch)
     # writer.add_scalar("Lines Cleared", episode_lines_cleared, epoch)
@@ -220,6 +229,17 @@ while epoch < NUM_EPOCHS:
     # writer.add_scalar("Learning Rate", get_lr(optimizer), epoch)
     # writer.add_scalar("Loss", loss.item(), epoch)
     # writer.flush()
+
+    progress_bar.set_postfix(
+        {
+            "Episode Reward": episode_reward,
+            "Episode Lines Cleared": episode_lines_cleared,
+            "Learning Rate": get_lr(optimizer),
+            "Loss": loss.item(),
+            "Epsilon": round(epsilon, 3),
+            "Steps": step_count,
+        }
+    )
 
     epoch_step = 0
     episode_reward = 0.0
