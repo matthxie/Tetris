@@ -9,12 +9,12 @@ import wandb
 from tqdm import tqdm
 
 GAMMA = 0.99
-BATCH_SIZE = 128
+BATCH_SIZE = 256
 REPLAY_SIZE = 300_000
 MIN_REPLAY_SIZE = 50_000
 EPSILON_START = 1.00
 EPSILON_END = 1e-3
-EPSILON_DECAY = 20_000
+EPSILON_DECAY = 50_000
 EPSILON_DECAY_RATE = 0.999
 LEARNING_RATE = 1e-3
 LEARNING_RATE_DECAY = 0.9
@@ -24,8 +24,8 @@ NUM_EPOCHS = 3_000
 NUM_STEPS = 10_000_000
 MAX_EPOCH_STEPS = 2000
 TAU = 0.005
-TARGET_UPDATE_FREQ = 10_000
-SAVE_FREQ = 10_000
+TARGET_UPDATE_FREQ = 80_000
+SAVE_FREQ = 80_000
 WANDB = True
 
 if WANDB:
@@ -167,6 +167,29 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
     state = new_state
     episode_reward += reward
     episode_lines_cleared += lines_cleared
+    step_count += 1
+
+    # update taret network
+    if step_count % TARGET_UPDATE_FREQ == 0:
+        target_net.load_state_dict(policy_net.state_dict())
+
+    # target_net_state_dict = target_net.state_dict()
+    # policy_net_state_dict = policy_net.state_dict()
+    # for key in policy_net_state_dict:
+    #   target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
+    # target_net.load_state_dict(target_net_state_dict)
+
+    # save model at interval
+    if step_count % SAVE_FREQ == 0 and epoch >= SAVE_FREQ:
+        torch.save(policy_net.state_dict(), "policy_weights.pth")
+        torch.save(target_net.state_dict(), "target_weights.pth")
+
+    # save model passing benchmark
+    avg = np.mean(np.array(reward_memory))
+    if avg > reward_avg_bench and avg > reward_avg:
+        torch.save(policy_net.state_dict(), "optimal_policy_weights.pth")
+        torch.save(target_net.state_dict(), "optimal_target_weights.pth")
+        reward_avg = avg
 
     if done == 1:
         epoch += 1
@@ -176,7 +199,6 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
         epoch_step += 1
         if epoch_step < MAX_EPOCH_STEPS:
             continue
-    step_count += 1
 
     # sample from replay memory
     transitions = random.sample(replay_memory, BATCH_SIZE)
@@ -225,7 +247,7 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
     loss = criterion(q_values, targets)
     optimizer.zero_grad()
     loss.backward()
-    nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=1.0)
+    nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=2.0)
     optimizer.step()
     # scheduler.step(loss)
 
@@ -247,28 +269,6 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
     # epsilon = sigmoid(epoch)
     epsilon = np.interp(epoch, [0, EPSILON_DECAY], [EPSILON_START, EPSILON_END])
     # epsilon = EPSILON_END + (EPSILON_START - EPSILON_END) * math.exp(-1. * epoch / EPSILON_DECAY)
-
-    # update taret network
-    if step_count % TARGET_UPDATE_FREQ == 0:
-        target_net.load_state_dict(policy_net.state_dict())
-
-    # target_net_state_dict = target_net.state_dict()
-    # policy_net_state_dict = policy_net.state_dict()
-    # for key in policy_net_state_dict:
-    #   target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
-    # target_net.load_state_dict(target_net_state_dict)
-
-    # save model at interval
-    if step_count % SAVE_FREQ == 0 and epoch >= SAVE_FREQ:
-        torch.save(policy_net.state_dict(), "policy_weights.pth")
-        torch.save(target_net.state_dict(), "target_weights.pth")
-
-    # save model passing benchmark
-    avg = np.mean(np.array(reward_memory))
-    if avg > reward_avg_bench and avg > reward_avg:
-        torch.save(policy_net.state_dict(), "optimal_policy_weights.pth")
-        torch.save(target_net.state_dict(), "optimal_target_weights.pth")
-        reward_avg = avg
 
 if WANDB:
     wandb.finish()

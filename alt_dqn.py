@@ -45,6 +45,8 @@ class AltDeepQNetwork(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(64 + 3 * 7, 64),
             nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
             nn.Linear(64, output_dim),
         )
 
