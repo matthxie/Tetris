@@ -1,8 +1,7 @@
 import torch
 import numpy as np
 from dqn import DeepQNetwork
-from envs import alt_tetris
-from envs import tetris
+import tetris
 
 torch.set_default_device("cuda")
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -11,7 +10,7 @@ torch.backends.cudnn.allow_tf32 = True
 LEARNING_RATE = 5e-4
 NUM_ACTIONS = 1
 
-env = alt_tetris.TetrisEnv()
+env = tetris.TetrisEnv()
 # env = tetris.TetrisEnv()
 policy_net = DeepQNetwork(NUM_ACTIONS, env)
 policy_net.load_state_dict(

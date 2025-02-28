@@ -4,7 +4,7 @@ from collections import deque
 import numpy as np
 import random
 from dqn import DeepQNetwork
-from envs.alt_tetris import TetrisEnv
+from tetris import TetrisEnv
 import wandb
 from tqdm import tqdm
 
@@ -48,11 +48,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 env = TetrisEnv()
 
 replay_memory = deque(maxlen=REPLAY_SIZE)
-reward_memory = deque(maxlen=10)
-reward_avg = 0
-reward_avg_bench = 2500
 episode_reward = 0.0
-episode_losses = []
 
 policy_net = DeepQNetwork(NUM_ACTIONS, env).to(device)
 target_net = DeepQNetwork(NUM_ACTIONS, env).to(device)
@@ -65,47 +61,12 @@ target_net.train()
 optimizer = torch.optim.AdamW(policy_net.parameters(), lr=LEARNING_RATE, amsgrad=True)
 criterion = nn.SmoothL1Loss()
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10)
-
-example_state = torch.tensor(np.array([4, 5, 4, 3, 3, 2])).to(device)
-
 state = env.reset()
-
-
-def sigmoid(x):
-    return 1 / (1 + np.exp(-1 * (x - 10)))
 
 
 def get_lr(optimizer):
     for g in optimizer.param_groups:
         return g["lr"]
-
-
-def calculate_priority():
-    states = torch.as_tensor(
-        np.array([m[0] for m in replay_memory]), dtype=torch.float32
-    ).to(device)
-    rewards = torch.as_tensor(
-        np.array([m[2] for m in replay_memory]), dtype=torch.float32
-    ).to(device)
-    new_states = (
-        torch.as_tensor(np.array([m[4] for m in replay_memory]), dtype=torch.float32)
-        .squeeze(1)
-        .to(device)
-    )
-
-    target_net.eval()
-    policy_net.eval()
-    with torch.no_grad():
-        estimates = policy_net(states)
-        targets = target_net(new_states)
-    policy_net.train()
-    target_net.train()
-
-    priorities = np.array(np.abs(estimates - rewards - targets))
-    probabilities = priorities / np.sum(priorities)
-    replay_memory = np.array(replay_memory)
-    replay_memory[:, 5] = probabilities
-    replay_memory = deque(map(tuple, replay_memory))
 
 
 # init replay memory
@@ -173,28 +134,14 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
     if step_count % TARGET_UPDATE_FREQ == 0:
         target_net.load_state_dict(policy_net.state_dict())
 
-    # target_net_state_dict = target_net.state_dict()
-    # policy_net_state_dict = policy_net.state_dict()
-    # for key in policy_net_state_dict:
-    #   target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
-    # target_net.load_state_dict(target_net_state_dict)
-
     # save model at interval
     if step_count % SAVE_FREQ == 0 and epoch >= SAVE_FREQ:
         torch.save(policy_net.state_dict(), "policy_weights.pth")
         torch.save(target_net.state_dict(), "target_weights.pth")
 
-    # save model passing benchmark
-    avg = np.mean(np.array(reward_memory))
-    if avg > reward_avg_bench and avg > reward_avg:
-        torch.save(policy_net.state_dict(), "optimal_policy_weights.pth")
-        torch.save(target_net.state_dict(), "optimal_target_weights.pth")
-        reward_avg = avg
-
     if done == 1:
         epoch += 1
         state = env.reset()
-        reward_memory.append(episode_reward)
     else:
         epoch_step += 1
         if epoch_step < MAX_EPOCH_STEPS:
