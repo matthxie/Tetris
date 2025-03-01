@@ -1,6 +1,5 @@
 import numpy as np
 from random import randrange as rand
-import pygame, sys
 
 config = {"cell_size": 20, "cols": 10, "rows": 20, "delay": 750, "maxfps": 30}
 
@@ -15,42 +14,43 @@ colors = [
     (0, 220, 220),
 ]
 
-# Define the shapes of the single parts
 tetris_shapes = [
-    [[1, 1, 1], [0, 1, 0]],
-    [[0, 1, 1], [1, 1, 0]],
-    [[1, 1, 0], [0, 1, 1]],
-    [[1, 0, 0], [1, 1, 1]],
-    [[0, 0, 1], [1, 1, 1]],
-    [[1, 1, 1, 1]],
-    [[1, 1], [1, 1]],
+    np.array([[1, 1, 1], [0, 1, 0]]),
+    np.array([[0, 1, 1], [1, 1, 0]]),
+    np.array([[1, 1, 0], [0, 1, 1]]),
+    np.array([[1, 0, 0], [1, 1, 1]]),
+    np.array([[0, 0, 1], [1, 1, 1]]),
+    np.array([[1, 1, 1, 1]]),
+    np.array([[1, 1], [1, 1]]),
 ]
 
 
 def rotate_clockwise(shape):
-    return [
-        [shape[y][x] for y in range(len(shape))]
-        for x in range(len(shape[0]) - 1, -1, -1)
-    ]
+    return np.transpose(np.flip(shape, 1))
 
 
 def check_collision(board, shape, offset):
     off_x, off_y = offset
-    for cy, row in enumerate(shape):
-        for cx, cell in enumerate(row):
-            try:
-                if cell and board[cy + off_y][cx + off_x]:
-                    return True
-            except IndexError:
-                return True
-    return False
+    shape_h, shape_w = shape.shape
+
+    if (
+        off_x < 0
+        or off_y < 0
+        or off_x + shape_w > config["cols"]
+        or off_y + shape_h > config["rows"] + 1
+    ):
+        return True
+
+    board_section = board[off_y : off_y + shape_h, off_x : off_x + shape_w]
+    if board_section.shape != shape.shape:
+        return True
+
+    return np.any(np.logical_and(board_section, shape))
 
 
 def remove_row(board, row):
-    # del board[row]
-    board = np.delete(board, row, axis=0)
-    board = np.vstack((np.zeros((1, 10), dtype=np.float32), board))
-
+    board[1 : row + 1] = board[0:row]
+    board[0] = 0
     return board
 
 
@@ -63,55 +63,49 @@ def join_matrixes(mat1, mat2, mat2_off):
 
 
 def new_board():
-    board = [[0 for x in range(config["cols"])] for y in range(config["rows"])]
-    board += [[1 for x in range(config["cols"])]]
-
-    return np.array(board)
+    board = np.zeros((config["rows"] + 1, config["cols"]), dtype=np.float32)
+    board[-1] = 1
+    return board
 
 
 def get_board_heights(board):
-    boardHeights = []
+    heights = np.zeros(config["cols"], dtype=np.int32)
 
-    for i in range(10):
-        for j in range(20):
-            if board[j][i] != 0:
-                boardHeights.append(20 - j)
-                break
-            if j == 19 and board[j][i] == 0:
-                boardHeights.append(0)
+    for col in range(config["cols"]):
+        filled_cells = np.where(board[: config["rows"], col] > 0)[0]
+        if filled_cells.size > 0:
+            heights[col] = config["rows"] - filled_cells[0]
 
-    return boardHeights
+    return heights
 
 
 def get_bumpiness(heights):
-    currs = np.array(heights[:-1])
-    nexts = np.array(heights[1:])
-    diffs = np.abs(currs - nexts)
-    total_bumpiness = np.sum(diffs)
+    diffs = np.abs(heights[1:] - heights[:-1])
 
-    return total_bumpiness
+    return np.sum(diffs)
 
 
 def get_num_holes(board):
     holes = 0
+    board_rows = config["rows"]
 
-    for i in range(10):
-        new_col = True
-        for j in range(20):
-            if new_col and board[j][i] != 0:
-                new_col = False
-                continue
-            if board[j][i] == 0 and not new_col:
-                holes += 1
+    highest_filled = np.zeros(config["cols"], dtype=np.int32)
+    for col in range(config["cols"]):
+        filled = np.where(board[:board_rows, col] > 0)[0]
+        if filled.size > 0:
+            highest_filled[col] = filled[0]
+        else:
+            highest_filled[col] = board_rows
+
+    for col in range(config["cols"]):
+        if highest_filled[col] < board_rows:
+            holes += np.sum(board[highest_filled[col] : board_rows, col] == 0)
 
     return holes
 
 
 class TetrisEnv:
     def __init__(self, state_dim=11, action_dim=(10, 20)):
-        pygame.init()
-        # pygame.key.set_repeat(250,25)
-
         self.gameover = 0
         self.paused = False
         self.blocks_placed = 0
@@ -128,10 +122,6 @@ class TetrisEnv:
             self.next_stones.append(rand(1, len(tetris_shapes) + 1))
 
         self.board = new_board()
-
-        pygame.event.set_blocked(pygame.MOUSEMOTION)
-
-        # self.init_game()
 
     def check_invalid_move(self, x_dest, r_dest=-1):
         stone = self.next_stones[0]
@@ -225,8 +215,6 @@ class TetrisEnv:
             if col == 1:
                 self.gameover = 1
                 break
-        # if check_collision(self.board, self.stone, (self.stone_x, self.stone_y)):
-        # 	self.gameover = 1
 
     def init_game(self):
         self.gameover = 0
@@ -242,47 +230,12 @@ class TetrisEnv:
         self.new_stone(probe=False)
         self.stone_orientation = 0
 
-    def center_msg(self, msg):
-        for i, line in enumerate(msg.splitlines()):
-            msg_image = pygame.font.Font(pygame.font.get_default_font(), 12).render(
-                line, False, (255, 255, 255), (0, 0, 0)
-            )
-
-            msgim_center_x, msgim_center_y = msg_image.get_size()
-            msgim_center_x //= 2
-            msgim_center_y //= 2
-
-            # self.screen.blit(msg_image, (
-            #   self.width // 2-msgim_center_x,
-            #   self.height // 2-msgim_center_y+i*22))
-
-    # def draw_matrix(self, matrix, offset):
-    # 	off_x, off_y  = offset
-    # 	for y, row in enumerate(matrix):
-    # 		for x, val in enumerate(row):
-    # 			if val:
-    # 				pygame.draw.rect(self.screen,
-    # 					colors[val],
-    # 					pygame.Rect(
-    # 						(off_x+x) *
-    # 						  config['cell_size'],
-    # 						(off_y+y) *
-    # 						  config['cell_size'],
-    # 						config['cell_size'],
-    # 						config['cell_size']),0)
-
     def move_to_placement(self, x_dest, probe=True):
         delta_x = x_dest - self.stone_x
-        # self.toggle_pause()
 
         self.move(delta_x)
 
         lines_cleared = self.hardDrop(probe)
-
-        # result_board = np.array(self.board)[:20, :]
-        result_board = np.array(self.board, dtype=np.float32)
-
-        # self.toggle_pause()
 
         return [lines_cleared, self.board]
 
@@ -294,11 +247,6 @@ class TetrisEnv:
             new_x = config["cols"] - len(self.stone[0])
         if not check_collision(self.board, self.stone, (new_x, self.stone_y)):
             self.stone_x = new_x
-
-    def quit(self):
-        self.center_msg("Exiting...")
-        pygame.display.update()
-        sys.exit()
 
     def drop(self, probe=True):
         self.stone_y += 1
@@ -341,11 +289,6 @@ class TetrisEnv:
     def toggle_pause(self):
         self.paused = not self.paused
 
-    # def start_game(self):
-    # 	if self.gameover:
-    # 		self.init_game()
-    # 		self.gameover = 0
-
     def set_board(self, board):
         self.board = board
 
@@ -374,13 +317,10 @@ class TetrisEnv:
     def get_movement_bounds(self):
         bounds = []
 
-        bounds.append(config["cols"] - len(self.stone[0]))
-        temp_stone = rotate_clockwise(self.stone)
-        bounds.append(config["cols"] - len(temp_stone[0]))
-        temp_stone = rotate_clockwise(temp_stone)
-        bounds.append(config["cols"] - len(temp_stone[0]))
-        temp_stone = rotate_clockwise(temp_stone)
-        bounds.append(config["cols"] - len(temp_stone[0]))
+        stone = self.stone
+        for _ in range(4):
+            bounds.append(config["cols"] - stone.shape[1])
+            stone = rotate_clockwise(stone)
 
         return bounds
 
@@ -389,55 +329,6 @@ class TetrisEnv:
         mask = []
 
         for i in range(len(bounds)):
-            for j in range(bounds[i]):
-                mask.append(True)
-            for j in range(10 - bounds[i]):
-                mask.append(False)
+            mask.extend([True] * bounds[i] + [False] * (10 - bounds[i]))
 
         return mask
-
-    # def run(self):
-    # 	key_actions = {
-    # 		'ESCAPE':	self.quit,
-    # 		'LEFT':		lambda:self.move(-1),
-    # 		'RIGHT':	lambda:self.move(+1),
-    # 		'DOWN':		self.hardDrop,
-    # 		'UP':		self.rotate_stone,
-    # 		'p':		self.toggle_pause,
-    # 		'SPACE':	self.start_game
-    # 	}
-
-    # 	self.gameover = False
-    # 	self.paused = False
-
-    # pygame.time.set_timer(pygame.USEREVENT+1, config['delay'])
-    # clock = pygame.time.Clock()
-    # while 1:
-    # 	self.screen.fill((0,0,0))
-    # 	if self.gameover:
-    # 		self.center_msg("""Game Over! Press space to continue""")
-    # 	else:
-    # 		if self.paused:
-    # 			self.center_msg("Paused")
-    # 		else:
-    # 			self.draw_matrix(self.board, (0,0))
-    # 			self.draw_matrix(self.stone, (self.stone_x, self.stone_y))
-
-    # pygame.display.update()
-
-    # for event in pygame.event.get():
-    # 	if event.type == pygame.USEREVENT+1:
-    # 		self.drop()
-    # 	elif event.type == pygame.QUIT:
-    # 		self.quit()
-    # 	elif event.type == pygame.KEYDOWN:
-    # 		for key in key_actions:
-    # 			if event.key == eval("pygame.K_"+key):
-    # 				key_actions[key]()
-
-    # clock.tick(config['maxfps'])
-
-
-# if __name__ == '__main__':
-# 	App = TetrisEnv()
-# 	App.run()

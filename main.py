@@ -136,27 +136,6 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
         buffer.sample(device, BATCH_SIZE)
     )
 
-    # states = torch.as_tensor(
-    #     np.array([t[0] for t in transitions]), dtype=torch.float32
-    # ).to(device)
-    # actions = torch.as_tensor(
-    #     np.asarray([t[1] for t in transitions]), dtype=torch.int64
-    # ).to(device)
-    # rewards = torch.as_tensor(
-    #     np.asarray([t[2] for t in transitions]), dtype=torch.float32
-    # ).to(device)
-    # dones = torch.as_tensor(
-    #     np.asarray([t[3] for t in transitions]), dtype=torch.float32
-    # ).to(device)
-    # new_states = torch.as_tensor(
-    #     np.array([t[4] for t in transitions]), dtype=torch.float32
-    # ).to(device)
-    # valid_moves = (
-    #     torch.as_tensor(np.array([t[5] for t in transitions]), dtype=torch.bool)
-    #     .squeeze(1)
-    #     .to(device)
-    # )
-
     # calculate targets and q-values
     policy_net.eval()
     target_net.eval()
