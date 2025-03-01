@@ -12,7 +12,7 @@ from replay_memory import PrioritizedReplayMemory
 GAMMA = 0.99
 BATCH_SIZE = 256
 REPLAY_SIZE = 300_000
-MIN_REPLAY_SIZE = 50_000
+MIN_REPLAY_SIZE = 50_0
 EPSILON_START = 1.00
 EPSILON_END = 1e-3
 EPSILON_DECAY = 50_000
@@ -22,10 +22,10 @@ LEARNING_RATE_DECAY = 0.9
 LEARNING_RATE_DECAY_FREQ = 500
 NUM_ACTIONS = 40
 NUM_EPOCHS = 3_000
-NUM_STEPS = 10_000_000
+NUM_STEPS = 1_000_000
 MAX_EPOCH_STEPS = 2000
 TAU = 0.005
-TARGET_UPDATE_FREQ = 80_000
+TARGET_UPDATE_FREQ = 40_000
 SAVE_FREQ = 80_000
 WANDB = False
 
@@ -44,7 +44,6 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-# writer = SummaryWriter()
 
 env = TetrisEnv()
 

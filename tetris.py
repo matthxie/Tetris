@@ -121,6 +121,7 @@ class TetrisEnv:
         self.width = config["cell_size"] * config["cols"]
         self.height = config["cell_size"] * config["rows"]
         self.next_stones = []
+        self.num_holes
         self.stone_orientation = 0
 
         for _ in range(3):
@@ -132,20 +133,6 @@ class TetrisEnv:
 
         # self.init_game()
 
-    def calc_reward(self, board):
-        reward = 0.0
-
-        heights = get_board_heights(board)
-        holes = get_num_holes(board)
-        bumpiness = get_bumpiness(heights)
-
-        reward += bumpiness * -0.4
-        reward += sum(heights) * -0.51
-        reward += np.sum(np.abs(np.diff(heights))) * -0.18
-        reward += holes * -0.36
-
-        return reward
-
     def check_invalid_move(self, x_dest, r_dest=-1):
         stone = self.next_stones[0]
         if r_dest == -1:
@@ -153,18 +140,14 @@ class TetrisEnv:
 
         if stone == 7:
             if x_dest == 9:
-                # print(self.stone, ", ", rot, ", ", stone, ", ", x_dest, ", ", r_dest)
                 return True
         elif stone == 6:
             if (r_dest == 0 or r_dest == 2) and x_dest > 6:
-                # print(self.stone, ", ", rot, ", ", stone, ", ", x_dest, ", ", r_dest)
                 return True
         else:
             if x_dest == 9:
-                # print(self.stone, ", ", rot, ", ", stone, ", ", x_dest, ", ", r_dest)
                 return True
             elif x_dest == 8 and r_dest != 1 and r_dest != 3:
-                # print(self.stone, ", ", rot, ", ", stone, ", ", x_dest, ", ", r_dest)
                 return True
 
         return False
@@ -188,32 +171,22 @@ class TetrisEnv:
         return next_state
 
     def step(self, x_dest, r_dest, probe, display=False):
-        board_backup = self.board.copy()
-        next_stones_backup = self.next_stones.copy()
-        stone_backup = self.stone.copy()
-        stone_x_backup = self.stone_x
-        stone_y_backup = self.stone_y
-        stone_orientation_backup = self.stone_orientation
-
         for i in range(r_dest):
             self.rotate_stone()
 
         self.blocks_placed += 1
-        old_reward = self.calc_reward(self.board)
 
         results = self.move_to_placement(x_dest, probe)
         lines_cleared = results[0]
         result_board = results[1]
         self.lines_cleared += lines_cleared
-
-        if not probe:
-            self.board = result_board
+        self.board = result_board
 
         heights = get_board_heights(result_board)
         bumpiness = get_bumpiness(heights)
         holes = get_num_holes(result_board)
-        reward = 1 + 10 * lines_cleared**2
-        # reward = self.calc_reward(result_board) - old_reward + 10*lines_cleared
+        new_holes = holes - self.num_holes
+        reward = 1 + 30 * lines_cleared**2 - 2 * int(new_holes > 0) * new_holes
         self.num_holes = holes
 
         next_state = self.board[:-1]
@@ -223,19 +196,10 @@ class TetrisEnv:
         result_info = np.append(result_info, holes - self.num_holes)
 
         if display:
-            # print(self.calc_reward(result_board), ", ", old_reward)
             print(result_board)
 
             if lines_cleared > 0:
                 print("lines cleared: ", lines_cleared)
-
-        if probe:
-            self.board = board_backup
-            self.stone = stone_backup
-            self.next_stones = next_stones_backup
-            self.stone_x = stone_x_backup
-            self.stone_y = stone_y_backup
-            self.stone_orientation = stone_orientation_backup
 
         next_state = np.concatenate((next_state.flatten(), result_info))
         next_state = next_state.tolist()
