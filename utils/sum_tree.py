@@ -1,3 +1,6 @@
+import numpy as np
+
+
 class SumTree:
     def __init__(self, capacity):
         self.capacity = capacity

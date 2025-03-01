@@ -3,27 +3,28 @@ import torch
 from utils.sum_tree import SumTree
 
 
-class ReplayMemory:
-    def __init__(self, env, min_size, max_size, alpha, beta, beta_increment, epsilon):
-        self.env = env
+class PrioritizedReplayMemory:
+    def __init__(
+        self, max_size, alpha=0.6, beta=0.4, beta_increment=10000, epsilon=1e-5
+    ):
         self.tree = SumTree(max_size)
         self.alpha = alpha
         self.beta_start = beta
         self.beta_frames = beta_increment
         self.frame = 1
-        self.epsilon = 1e-5
+        self.epsilon = epsilon
 
-        self.init_replay_memory(min_size, max_size)
+    def init_replay_memory(self, env, min_size):
+        state = env.reset()
 
-    def init_replay_memory(self, min_size, max_size):
         for _ in range(min_size):
-            valid_moves_mask = torch.tensor(self.env.get_invalid_moves()).unsqueeze(0)
+            valid_moves_mask = torch.tensor(env.get_invalid_moves()).unsqueeze(0)
 
             action = np.random.randint(0, 40)
             while valid_moves_mask[0, action] == False:
                 action = np.random.randint(0, 40)
 
-            new_state, reward, done, info = self.env.step(
+            new_state, reward, done, info = env.step(
                 action % 10, int(action / 10), probe=False
             )
             transition = (
@@ -34,12 +35,12 @@ class ReplayMemory:
                 new_state,
                 valid_moves_mask.to("cpu"),
             )
-            self.replay_memory.append(transition)
+            self.add(state, action, reward, done, new_state, valid_moves_mask)
 
             state = new_state
 
             if done == 1:
-                state = self.env.reset()
+                state = env.reset()
 
     def add(self, state, action, reward, done, new_state, valid_moves_mask):
         max_priority = (
@@ -49,7 +50,7 @@ class ReplayMemory:
             max_priority, (state, action, reward, done, new_state, valid_moves_mask)
         )
 
-    def sample(self, batch_size):
+    def sample(self, device, batch_size):
         batch = []
         idxs = []
         priorities = []
@@ -74,13 +75,13 @@ class ReplayMemory:
 
         states, actions, rewards, dones, next_states, valid_moves = zip(*batch)
         return (
-            torch.tensor(np.array(states), dtype=torch.float32),
-            torch.tensor(actions, dtype=torch.int64),
-            torch.tensor(rewards, dtype=torch.float32),
-            torch.tensor(dones, dtype=torch.float32),
-            torch.tensor(np.array(next_states), dtype=torch.float32),
-            torch.tensor(np.array(valid_moves), dtype=torch.float32),
-            torch.tensor(weights, dtype=torch.float32),
+            torch.tensor(np.array(states), dtype=torch.float32).to(device),
+            torch.tensor(actions, dtype=torch.int64).to(device),
+            torch.tensor(rewards, dtype=torch.float32).to(device),
+            torch.tensor(dones, dtype=torch.float32).to(device),
+            torch.tensor(np.array(next_states), dtype=torch.float32).to(device),
+            torch.tensor(np.array(valid_moves), dtype=torch.bool).squeeze(1).to(device),
+            torch.tensor(weights, dtype=torch.float32).to(device),
             idxs,
         )
 

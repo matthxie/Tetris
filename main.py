@@ -7,6 +7,7 @@ from dqn import DeepQNetwork
 from tetris import TetrisEnv
 import wandb
 from tqdm import tqdm
+from replay_memory import PrioritizedReplayMemory
 
 GAMMA = 0.99
 BATCH_SIZE = 256
@@ -26,7 +27,7 @@ MAX_EPOCH_STEPS = 2000
 TAU = 0.005
 TARGET_UPDATE_FREQ = 80_000
 SAVE_FREQ = 80_000
-WANDB = True
+WANDB = False
 
 if WANDB:
     wandb.init(
@@ -47,6 +48,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 
 env = TetrisEnv()
 
+buffer = PrioritizedReplayMemory(REPLAY_SIZE)
 replay_memory = deque(maxlen=REPLAY_SIZE)
 episode_reward = 0.0
 
@@ -61,7 +63,6 @@ target_net.train()
 optimizer = torch.optim.AdamW(policy_net.parameters(), lr=LEARNING_RATE, amsgrad=True)
 criterion = nn.SmoothL1Loss()
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10)
-state = env.reset()
 
 
 def get_lr(optimizer):
@@ -71,22 +72,7 @@ def get_lr(optimizer):
 
 # init replay memory
 print("Initializing memory replay: size", MIN_REPLAY_SIZE)
-
-for _ in range(MIN_REPLAY_SIZE):
-    valid_moves_mask = torch.tensor(env.get_invalid_moves()).unsqueeze(0)
-
-    action = np.random.randint(0, 40)
-    while valid_moves_mask[0, action] == False:
-        action = np.random.randint(0, 40)
-
-    new_state, reward, done, info = env.step(action % 10, int(action / 10), probe=False)
-    transition = (state, action, reward, done, new_state, valid_moves_mask.to("cpu"))
-    replay_memory.append(transition)
-
-    state = new_state
-
-    if done == 1:
-        state = env.reset()
+buffer.init_replay_memory(env, MIN_REPLAY_SIZE)
 
 # training
 epoch = 0
@@ -122,8 +108,7 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
     new_state, reward, done, lines_cleared = env.step(
         action % 10, int(action / 10), probe=False
     )
-    transition = (state, action, reward, done, new_state, valid_moves_mask.to("cpu"))
-    replay_memory.append(transition)
+    buffer.add(state, action, reward, done, new_state, valid_moves_mask.to("cpu"))
 
     state = new_state
     episode_reward += reward
@@ -148,28 +133,30 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
             continue
 
     # sample from replay memory
-    transitions = random.sample(replay_memory, BATCH_SIZE)
-
-    states = torch.as_tensor(
-        np.array([t[0] for t in transitions]), dtype=torch.float32
-    ).to(device)
-    actions = torch.as_tensor(
-        np.asarray([t[1] for t in transitions]), dtype=torch.int64
-    ).to(device)
-    rewards = torch.as_tensor(
-        np.asarray([t[2] for t in transitions]), dtype=torch.float32
-    ).to(device)
-    dones = torch.as_tensor(
-        np.asarray([t[3] for t in transitions]), dtype=torch.float32
-    ).to(device)
-    new_states = torch.as_tensor(
-        np.array([t[4] for t in transitions]), dtype=torch.float32
-    ).to(device)
-    valid_moves = (
-        torch.as_tensor(np.array([t[5] for t in transitions]), dtype=torch.bool)
-        .squeeze(1)
-        .to(device)
+    states, actions, rewards, dones, new_states, valid_moves, weights, idxs = (
+        buffer.sample(device, BATCH_SIZE)
     )
+
+    # states = torch.as_tensor(
+    #     np.array([t[0] for t in transitions]), dtype=torch.float32
+    # ).to(device)
+    # actions = torch.as_tensor(
+    #     np.asarray([t[1] for t in transitions]), dtype=torch.int64
+    # ).to(device)
+    # rewards = torch.as_tensor(
+    #     np.asarray([t[2] for t in transitions]), dtype=torch.float32
+    # ).to(device)
+    # dones = torch.as_tensor(
+    #     np.asarray([t[3] for t in transitions]), dtype=torch.float32
+    # ).to(device)
+    # new_states = torch.as_tensor(
+    #     np.array([t[4] for t in transitions]), dtype=torch.float32
+    # ).to(device)
+    # valid_moves = (
+    #     torch.as_tensor(np.array([t[5] for t in transitions]), dtype=torch.bool)
+    #     .squeeze(1)
+    #     .to(device)
+    # )
 
     # calculate targets and q-values
     policy_net.eval()
@@ -188,15 +175,21 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
     target_q_values = target_q_values.max(dim=1)[0]
     q_values = q_values.gather(1, actions.unsqueeze(-1)).flatten()
 
+    td_errors = rewards + 0.99 * target_q_values - q_values
+
     targets = rewards + (GAMMA * (1 - dones) * (target_q_values))
 
     # gradient descent
     loss = criterion(q_values, targets)
+    loss = (weights * loss).mean()
     optimizer.zero_grad()
     loss.backward()
     nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=2.0)
     optimizer.step()
     # scheduler.step(loss)
+
+    # update PER priorities
+    buffer.update_priorities(idxs, td_errors.abs().detach().cpu().numpy())
 
     # logs
     if WANDB:
