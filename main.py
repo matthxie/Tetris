@@ -11,20 +11,16 @@ from replay_memory import PrioritizedReplayMemory
 
 GAMMA = 0.99
 BATCH_SIZE = 256
-REPLAY_SIZE = 300_000
+REPLAY_SIZE = 200_000
 MIN_REPLAY_SIZE = 50_0
-EPSILON_START = 1.00
-EPSILON_END = 1e-3
-EPSILON_DECAY = 50_000
-EPSILON_DECAY_RATE = 0.999
 LEARNING_RATE = 1e-3
-LEARNING_RATE_DECAY = 0.9
 LEARNING_RATE_DECAY_FREQ = 500
 NUM_ACTIONS = 40
-NUM_EPOCHS = 3_000
 NUM_STEPS = 1_000_000
 MAX_EPOCH_STEPS = 2000
-TAU = 0.005
+EPSILON_START = 1.00
+EPSILON_END = 1e-3
+EPSILON_DECAY = 0.65 * NUM_STEPS
 TARGET_UPDATE_FREQ = 40_000
 SAVE_FREQ = 80_000
 WANDB = False
@@ -84,6 +80,7 @@ progress_bar = tqdm(range(NUM_STEPS), desc="Training Progress")
 
 # training loop
 for i in tqdm(range(NUM_STEPS), position=0, leave=True):
+    epsilon = np.interp(epoch, [0, EPSILON_DECAY], [EPSILON_START, EPSILON_END])
     rand_sample = random.random()
     valid_moves_mask = torch.tensor(env.get_invalid_moves()).unsqueeze(0).to(device)
 
@@ -164,7 +161,6 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
     loss.backward()
     nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=2.0)
     optimizer.step()
-    # scheduler.step(loss)
 
     # update PER priorities
     buffer.update_priorities(idxs, td_errors.abs().detach().cpu().numpy())
@@ -184,9 +180,6 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
     epoch_step = 0
     episode_reward = 0.0
     episode_lines_cleared = 0
-    # epsilon = sigmoid(epoch)
-    epsilon = np.interp(epoch, [0, EPSILON_DECAY], [EPSILON_START, EPSILON_END])
-    # epsilon = EPSILON_END + (EPSILON_START - EPSILON_END) * math.exp(-1. * epoch / EPSILON_DECAY)
 
 if WANDB:
     wandb.finish()

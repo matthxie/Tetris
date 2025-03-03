@@ -9,11 +9,9 @@ class SpatialAttention(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        # Generate attention map
         attention = self.conv(x)
         attention = self.sigmoid(attention)
 
-        # Apply attention (broadcast across channel dimension)
         return x * attention.expand_as(x)
 
 
@@ -35,7 +33,6 @@ class ResidualBlock(nn.Module):
         out = self.conv2(out)
         out = self.bn2(out)
 
-        # Add the residual connection
         out += residual
         out = F.relu(out)
 
