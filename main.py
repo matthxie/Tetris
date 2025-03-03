@@ -12,18 +12,18 @@ from replay_memory import PrioritizedReplayMemory
 GAMMA = 0.99
 BATCH_SIZE = 256
 REPLAY_SIZE = 200_000
-MIN_REPLAY_SIZE = 50_0
+MIN_REPLAY_SIZE = 50_000
 LEARNING_RATE = 1e-3
 LEARNING_RATE_DECAY_FREQ = 500
 NUM_ACTIONS = 40
-NUM_STEPS = 1_000_000
+NUM_STEPS = 1_500_000
 MAX_EPOCH_STEPS = 2000
 EPSILON_START = 1.00
 EPSILON_END = 1e-3
 EPSILON_DECAY = 0.65 * NUM_STEPS
-TARGET_UPDATE_FREQ = 40_000
+TARGET_UPDATE_FREQ = 20_000
 SAVE_FREQ = 80_000
-WANDB = False
+WANDB = True
 
 if WANDB:
     wandb.init(
@@ -80,7 +80,7 @@ progress_bar = tqdm(range(NUM_STEPS), desc="Training Progress")
 
 # training loop
 for i in tqdm(range(NUM_STEPS), position=0, leave=True):
-    epsilon = np.interp(epoch, [0, EPSILON_DECAY], [EPSILON_START, EPSILON_END])
+    epsilon = np.interp(i, [0, EPSILON_DECAY], [EPSILON_START, EPSILON_END])
     rand_sample = random.random()
     valid_moves_mask = torch.tensor(env.get_invalid_moves()).unsqueeze(0).to(device)
 
@@ -142,16 +142,13 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
         target_q_values = target_net(new_states)
 
     q_values = torch.where(valid_moves, q_values, -1e9)
-    # target_q_values = torch.where(valid_moves, target_q_values, -1e9)
 
     policy_net.train()
     target_net.train()
 
     target_q_values = target_q_values.max(dim=1)[0]
     q_values = q_values.gather(1, actions.unsqueeze(-1)).flatten()
-
     td_errors = rewards + 0.99 * target_q_values - q_values
-
     targets = rewards + (GAMMA * (1 - dones) * (target_q_values))
 
     # gradient descent
