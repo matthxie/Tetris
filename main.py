@@ -33,6 +33,7 @@ if WANDB:
             "epochs": NUM_STEPS,
             "batch_size": BATCH_SIZE,
             "replay_size": REPLAY_SIZE,
+            "update_freq": TARGET_UPDATE_FREQ,
         },
     )
 
@@ -45,7 +46,6 @@ env = TetrisEnv()
 
 buffer = PrioritizedReplayMemory(REPLAY_SIZE)
 replay_memory = deque(maxlen=REPLAY_SIZE)
-episode_reward = 0.0
 
 policy_net = DeepQNetwork(NUM_ACTIONS, env).to(device)
 target_net = DeepQNetwork(NUM_ACTIONS, env).to(device)
@@ -73,7 +73,9 @@ buffer.init_replay_memory(env, MIN_REPLAY_SIZE)
 epoch = 0
 epoch_step = 0
 step_count = 0
+episode_reward = 0.0
 episode_lines_cleared = 0
+episode_num_holes = 0
 epsilon = EPSILON_START
 state = env.reset()
 progress_bar = tqdm(range(NUM_STEPS), desc="Training Progress")
@@ -108,6 +110,7 @@ for i in tqdm(range(NUM_STEPS + 500_000), position=0, leave=True):
     state = new_state
     episode_reward += reward
     episode_lines_cleared += lines_cleared
+    episode_num_holes += num_holes
     step_count += 1
 
     # epsilon decay
@@ -171,6 +174,7 @@ for i in tqdm(range(NUM_STEPS + 500_000), position=0, leave=True):
                 "loss": loss.item(),
                 "Episode Reward": episode_reward,
                 "Episode Lines Cleared": episode_lines_cleared,
+                "Episode Num Holes": episode_num_holes,
                 "Learning Rate": get_lr(optimizer),
                 "Epsilon": round(epsilon, 3),
             }
@@ -179,6 +183,7 @@ for i in tqdm(range(NUM_STEPS + 500_000), position=0, leave=True):
     epoch_step = 0
     episode_reward = 0.0
     episode_lines_cleared = 0
+    episode_num_holes = 0
 
 if WANDB:
     wandb.finish()
