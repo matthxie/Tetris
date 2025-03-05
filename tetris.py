@@ -86,20 +86,22 @@ def get_bumpiness(heights):
 
 
 def get_num_holes(board):
-    holes = 0
-    board_rows = config["rows"]
+    first_one_mask = np.zeros_like(board, dtype=bool)
+    first_one_indices = np.argmax(board == 1, axis=0)
 
-    highest_filled = np.zeros(config["cols"], dtype=np.int32)
-    for col in range(config["cols"]):
-        filled = np.where(board[:board_rows, col] > 0)[0]
-        if filled.size > 0:
-            highest_filled[col] = filled[0]
-        else:
-            highest_filled[col] = board_rows
+    valid_columns = first_one_indices < board.shape[0]
 
-    for col in range(config["cols"]):
-        if highest_filled[col] < board_rows:
-            holes += np.sum(board[highest_filled[col] : board_rows, col] == 0)
+    row_indices = first_one_indices[valid_columns]
+    col_indices = np.where(valid_columns)[0]
+
+    first_one_mask[row_indices, col_indices] = True
+
+    below_mask = np.zeros_like(board, dtype=bool)
+    for col in range(board.shape[1]):
+        if valid_columns[col]:
+            below_mask[first_one_indices[col] + 1 :, col] = True
+
+    holes = np.sum((board == 0) & below_mask)
 
     return holes
 
@@ -176,14 +178,14 @@ class TetrisEnv:
         bumpiness = get_bumpiness(heights)
         holes = get_num_holes(result_board)
         new_holes = holes - self.num_holes
-        reward = 1 + 30 * lines_cleared**2 - 2 * int(new_holes > 0) * new_holes
+        reward = 0.75 + 30 * lines_cleared**2 - 2 * new_holes
         self.num_holes = holes
 
         next_state = self.board[:-1]
         result_info = np.array(self.next_stones, dtype=np.int64)
         result_info = np.append(result_info, np.sum(heights))
         result_info = np.append(result_info, bumpiness)
-        result_info = np.append(result_info, holes - self.num_holes)
+        result_info = np.append(result_info, new_holes)
 
         if display:
             print(result_board)
@@ -194,7 +196,7 @@ class TetrisEnv:
         next_state = np.concatenate((next_state.flatten(), result_info))
         next_state = next_state.tolist()
 
-        return next_state, reward, self.gameover, lines_cleared
+        return next_state, reward, self.gameover, lines_cleared, new_holes
 
     def render(self):
         pass

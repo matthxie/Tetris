@@ -24,17 +24,10 @@ class PrioritizedReplayMemory:
             while valid_moves_mask[0, action] == False:
                 action = np.random.randint(0, 40)
 
-            new_state, reward, done, info = env.step(
+            new_state, reward, done, lines_cleared, num_holes = env.step(
                 action % 10, int(action / 10), probe=False
             )
-            transition = (
-                state,
-                action,
-                reward,
-                done,
-                new_state,
-                valid_moves_mask.to("cpu"),
-            )
+
             self.add(state, action, reward, done, new_state, valid_moves_mask)
 
             state = new_state
@@ -62,7 +55,7 @@ class PrioritizedReplayMemory:
 
         for i in range(batch_size):
             s = np.random.uniform(segment * i, segment * (i + 1))
-            idx, data_idx = self.tree.sample(s)
+            idx, _ = self.tree.sample(s)
             priority, data = self.tree.get(idx)
             batch.append(data)
             idxs.append(idx)

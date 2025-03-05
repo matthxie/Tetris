@@ -11,7 +11,7 @@ from replay_memory import PrioritizedReplayMemory
 
 GAMMA = 0.99
 BATCH_SIZE = 256
-REPLAY_SIZE = 200_000
+REPLAY_SIZE = 250_000
 MIN_REPLAY_SIZE = 50_000
 LEARNING_RATE = 1e-3
 LEARNING_RATE_DECAY_FREQ = 500
@@ -23,7 +23,7 @@ EPSILON_END = 1e-3
 EPSILON_DECAY = 0.65 * NUM_STEPS
 TARGET_UPDATE_FREQ = 20_000
 SAVE_FREQ = 80_000
-WANDB = True
+WANDB = False
 
 if WANDB:
     wandb.init(
@@ -79,8 +79,7 @@ state = env.reset()
 progress_bar = tqdm(range(NUM_STEPS), desc="Training Progress")
 
 # training loop
-for i in tqdm(range(NUM_STEPS), position=0, leave=True):
-    epsilon = np.interp(i, [0, EPSILON_DECAY], [EPSILON_START, EPSILON_END])
+for i in tqdm(range(NUM_STEPS + 500_000), position=0, leave=True):
     rand_sample = random.random()
     valid_moves_mask = torch.tensor(env.get_invalid_moves()).unsqueeze(0).to(device)
 
@@ -101,7 +100,7 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
 
         action = torch.argmax(q_values).item()
 
-    new_state, reward, done, lines_cleared = env.step(
+    new_state, reward, done, lines_cleared, num_holes = env.step(
         action % 10, int(action / 10), probe=False
     )
     buffer.add(state, action, reward, done, new_state, valid_moves_mask.to("cpu"))
@@ -110,6 +109,9 @@ for i in tqdm(range(NUM_STEPS), position=0, leave=True):
     episode_reward += reward
     episode_lines_cleared += lines_cleared
     step_count += 1
+
+    # epsilon decay
+    epsilon = np.interp(step_count, [0, EPSILON_DECAY], [EPSILON_START, EPSILON_END])
 
     # update taret network
     if step_count % TARGET_UPDATE_FREQ == 0:
