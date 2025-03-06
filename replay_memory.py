@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from utils.sum_tree import SumTree
+from tqdm import tqdm
 
 
 class PrioritizedReplayMemory:
@@ -17,15 +18,15 @@ class PrioritizedReplayMemory:
     def init_replay_memory(self, env, min_size):
         state = env.reset()
 
-        for _ in range(min_size):
+        for i in tqdm(range(min_size), position=0, leave=True):
             valid_moves_mask = torch.tensor(env.get_invalid_moves()).unsqueeze(0)
 
             action = np.random.randint(0, 40)
             while valid_moves_mask[0, action] == False:
                 action = np.random.randint(0, 40)
 
-            new_state, reward, done, lines_cleared, num_holes = env.step(
-                action % 10, int(action / 10), probe=False
+            new_state, reward, done, lines_cleared, num_holes, delta_bumpiness = (
+                env.step(action % 10, int(action / 10), probe=False)
             )
 
             self.add(state, action, reward, done, new_state, valid_moves_mask)

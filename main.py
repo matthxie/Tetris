@@ -10,9 +10,9 @@ from tqdm import tqdm
 from replay_memory import PrioritizedReplayMemory
 
 GAMMA = 0.99
-BATCH_SIZE = 256
-REPLAY_SIZE = 250_000
-MIN_REPLAY_SIZE = 50_000
+BATCH_SIZE = 512
+REPLAY_SIZE = 20_000
+MIN_REPLAY_SIZE = 80_000
 LEARNING_RATE = 1e-3
 LEARNING_RATE_DECAY_FREQ = 500
 NUM_ACTIONS = 40
@@ -23,7 +23,7 @@ EPSILON_END = 1e-3
 EPSILON_DECAY = 0.65 * NUM_STEPS
 TARGET_UPDATE_FREQ = 20_000
 SAVE_FREQ = 80_000
-WANDB = False
+WANDB = True
 
 if WANDB:
     wandb.init(
@@ -66,8 +66,9 @@ def get_lr(optimizer):
 
 
 # init replay memory
-print("Initializing memory replay: size", MIN_REPLAY_SIZE)
+print("Initializing memory replay")
 buffer.init_replay_memory(env, MIN_REPLAY_SIZE)
+print("Starting training")
 
 # training
 epoch = 0
@@ -76,12 +77,13 @@ step_count = 0
 episode_reward = 0.0
 episode_lines_cleared = 0
 episode_num_holes = 0
+episode_bumpiness = 0
 epsilon = EPSILON_START
 state = env.reset()
 progress_bar = tqdm(range(NUM_STEPS), desc="Training Progress")
 
 # training loop
-for i in tqdm(range(NUM_STEPS + 500_000), position=0, leave=True):
+for i in tqdm(range(NUM_STEPS + 800_000), position=0, leave=True):
     rand_sample = random.random()
     valid_moves_mask = torch.tensor(env.get_invalid_moves()).unsqueeze(0).to(device)
 
@@ -102,7 +104,7 @@ for i in tqdm(range(NUM_STEPS + 500_000), position=0, leave=True):
 
         action = torch.argmax(q_values).item()
 
-    new_state, reward, done, lines_cleared, num_holes = env.step(
+    new_state, reward, done, lines_cleared, num_holes, delta_bumpiness = env.step(
         action % 10, int(action / 10), probe=False
     )
     buffer.add(state, action, reward, done, new_state, valid_moves_mask.to("cpu"))
@@ -111,6 +113,7 @@ for i in tqdm(range(NUM_STEPS + 500_000), position=0, leave=True):
     episode_reward += reward
     episode_lines_cleared += lines_cleared
     episode_num_holes += num_holes
+    episode_bumpiness += delta_bumpiness
     step_count += 1
 
     # epsilon decay
@@ -175,6 +178,7 @@ for i in tqdm(range(NUM_STEPS + 500_000), position=0, leave=True):
                 "Episode Reward": episode_reward,
                 "Episode Lines Cleared": episode_lines_cleared,
                 "Episode Num Holes": episode_num_holes,
+                "Episode Bumpiness": episode_bumpiness,
                 "Learning Rate": get_lr(optimizer),
                 "Epsilon": round(epsilon, 3),
             }
@@ -184,6 +188,7 @@ for i in tqdm(range(NUM_STEPS + 500_000), position=0, leave=True):
     episode_reward = 0.0
     episode_lines_cleared = 0
     episode_num_holes = 0
+    episode_bumpiness = 0
 
 if WANDB:
     wandb.finish()
